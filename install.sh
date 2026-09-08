@@ -49,5 +49,7 @@ rm -rf "$APP"
 /usr/bin/ditto "$NEW_APP" "$APP"
 
 printf '\nInstalled LookAway %s to %s\n' "$VERSION" "$APP"
-/usr/bin/open "$APP"
-echo "LookAway is running from your menu bar."
+if [ "${LOOKAWAY_NO_OPEN:-0}" != "1" ]; then
+  /usr/bin/open "$APP"
+  echo "LookAway is running from your menu bar."
+fi
