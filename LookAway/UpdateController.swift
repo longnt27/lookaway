@@ -15,6 +15,16 @@ struct ReleaseVersion: Comparable, Equatable {
         parts = text.split(separator: ".").map { Int($0) ?? 0 }
     }
 
+    static func == (lhs: ReleaseVersion, rhs: ReleaseVersion) -> Bool {
+        let count = max(lhs.parts.count, rhs.parts.count)
+        for index in 0..<count {
+            let a = index < lhs.parts.count ? lhs.parts[index] : 0
+            let b = index < rhs.parts.count ? rhs.parts[index] : 0
+            if a != b { return false }
+        }
+        return true
+    }
+
     static func < (lhs: ReleaseVersion, rhs: ReleaseVersion) -> Bool {
         let count = max(lhs.parts.count, rhs.parts.count)
         for index in 0..<count {
