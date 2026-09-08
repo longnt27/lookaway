@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popupBanner = PopupBannerController()
     private let settingsStore = SettingsStore()
     private let soundPlayer = SoundPlayer()
+    private let updateController = UpdateController()
     private var settingsWindowController: SettingsWindowController?
     private var heartbeat: DispatchSourceTimer?
     private var schedule = BreakSchedule(now: ProcessInfo.processInfo.systemUptime)
@@ -30,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         schedule = BreakSchedule(configuration: settingsStore.value.breakConfiguration, now: now)
         if settingsStore.value.startPaused { schedule.pause(at: now) }
         startHeartbeat()
+        updateController.startAutomaticChecks { [weak self] in
+            guard let self else { return false }
+            return self.schedule.phase != .onBreak && !self.schedule.isSleeping
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) { tearDown() }
@@ -54,6 +59,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.target = self
         menu.addItem(settings)
         settingsItem = settings
+        let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updates.target = self
+        menu.addItem(updates)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit LookAway", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
@@ -71,14 +79,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.showSettings()
     }
 
+    @objc private func checkForUpdates() {
+        updateController.checkManually()
+    }
+
     private func applySettings(_ value: AppSettings) throws {
         guard try settingsStore.save(value) else { return }
         let configuration = settingsStore.value.breakConfiguration
         if configuration != schedule.configuration { schedule.updateConfiguration(configuration, at: now) }
-        // A visible banner must not retain obsolete skip/snooze actions after saving.
         popupBanner.hide()
         if schedule.phase != .onBreak { overlayController.hide(cleanupOnly: true) }
-        // Active breaks retain a presentation snapshot. Non-timing changes preserve the schedule.
         startHeartbeat()
     }
 
@@ -185,7 +195,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlayController.hide(cleanupOnly: true)
         case .paused:
             if activeHours.ownsPause {
-                // "Keep Paused" turns an automatic pause into a manual pause.
                 activeHours.cancelAutomaticResume()
             } else if allowedNow {
                 schedule.resume(at: now)
@@ -254,6 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func tearDown() {
         stopHeartbeat()
+        updateController.stop()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         NotificationCenter.default.removeObserver(self)
         popupBanner.hide()

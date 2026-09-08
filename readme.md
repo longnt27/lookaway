@@ -2,29 +2,29 @@
 
 A native macOS menu-bar app for screen breaks, blink reminders, and posture checks.
 
-By default, take a **30-second break every 30 minutes**, with blink reminders every **5 minutes** and posture reminders every **10 minutes**. No account or internet connection required.
+By default, take a **30-second break every 30 minutes**, with blink reminders every **5 minutes** and posture reminders every **10 minutes**. No account required.
 
 ## Install
 
-Requires **macOS 15.4+** and **Xcode 16.4 or a compatible newer version**. Installation currently requires building from source; no prebuilt download is available.
+Requires **macOS 15.4+**. No Xcode required.
 
-1. Download this repository using **Code > Download ZIP**, extract it, and open `LookAway.xcodeproj` in Xcode.
-2. Select the **LookAway** scheme and **My Mac**. Under the app target's **Signing & Capabilities**, choose **Sign to Run Locally** or your development team.
-3. Choose **Product > Run**. LookAway appears in your menu bar, not the Dock.
+```sh
+curl -fsSL https://raw.githubusercontent.com/longnt27/lookaway/main/install.sh | sh
+```
 
-To install outside Xcode, right-click **Products > LookAway.app**, choose **Show in Finder**, and copy the app to **Applications**.
+The installer downloads the latest universal Apple Silicon/Intel release, verifies its SHA-256 checksum, installs it to `~/Applications`, and opens LookAway. Future updates are downloaded and installed automatically from GitHub Releases.
+
+> LookAway is intentionally distributed without Apple notarization. macOS may show a security warning depending on your system settings.
 
 ## Use
 
-Click the menu-bar icon to start a break, pause or resume the timer, open settings, or quit.
+Click the menu-bar icon to start a break, pause or resume the timer, open settings, check for updates, or quit.
 
-Before a break, the warning lets you skip or postpone it. During a break, **I'm ready** lets you finish early. These controls are configurable. Timers pause while your Mac sleeps; reopening the app starts a fresh session.
+Before a break, the warning lets you skip or postpone it. During a break, **I'm ready** lets you finish early. Timers pause while your Mac sleeps.
 
 ## Make it yours
 
 Open **Settings…** to choose timing presets, working days and hours, custom messages, displays, compact or full-screen reminders, sounds, and startup behavior. Adjust the break screen's clock, countdown, dimming, and text size with a built-in preview.
-
-**Save** keeps your preferences; **Cancel** discards edits. Timing changes start a fresh work session without unpausing a manually paused timer or interrupting an active break. Launch at login is managed separately by macOS and takes effect immediately.
 
 ## Support
 
