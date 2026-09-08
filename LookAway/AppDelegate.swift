@@ -5,8 +5,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var pauseItem: NSMenuItem?
     private var breakItem: NSMenuItem?
+    private var settingsItem: NSMenuItem?
     private let overlayController = OverlayController()
     private let popupBanner = PopupBannerController()
+    private let settingsStore = SettingsStore()
+    private var settingsWindowController: SettingsWindowController?
     private var heartbeat: DispatchSourceTimer?
     private var schedule = BreakSchedule(now: ProcessInfo.processInfo.systemUptime)
 
@@ -22,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged(_:)),
                                                name: NSApplication.didChangeScreenParametersNotification,
                                                object: nil)
-        schedule = BreakSchedule(now: now)
+        schedule = BreakSchedule(configuration: settingsStore.value.breakConfiguration, now: now)
         startHeartbeat()
     }
 
@@ -47,10 +50,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(pause)
         pauseItem = pause
         menu.addItem(.separator())
+        let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+        settingsItem = settings
+        menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit LookAway", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
         item.menu = menu
+    }
+
+    @objc func showSettings() {
+        // A screen-covering break would obscure the settings window.
+        guard schedule.phase != .onBreak, !schedule.isSleeping else { return }
+        if settingsWindowController == nil {
+            settingsWindowController = SettingsWindowController(
+                settings: { [weak self] in self?.settingsStore.value ?? .defaults },
+                onApply: { [weak self] value in try self?.applySettings(value) })
+        }
+        settingsWindowController?.showSettings()
+    }
+
+    private func applySettings(_ value: AppSettings) throws {
+        guard try settingsStore.save(value) else { return }
+        let configuration = settingsStore.value.breakConfiguration
+        if configuration != schedule.configuration {
+            schedule.updateConfiguration(configuration, at: now)
+            popupBanner.hide()
+            // Never dismiss or restart a break already in progress.
+            if schedule.phase != .onBreak { overlayController.hide(cleanupOnly: true) }
+            startHeartbeat()
+        } else {
+            // Display-only changes preserve elapsed time and a pending skip/warning.
+            updateStatusBar()
+        }
     }
 
     private func startHeartbeat() {
@@ -159,15 +193,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             icon = "cup.and.saucer.fill"
         }
         if let button = statusItem?.button {
-            button.title = " " + text
+            button.title = settingsStore.value.showCountdown ? " " + text : ""
+            button.imagePosition = settingsStore.value.showCountdown ? .imageLeading : .imageOnly
+            button.setAccessibilityLabel("LookAway: " + text)
             let image = NSImage(systemSymbolName: icon, accessibilityDescription: text)
             image?.isTemplate = true
             button.image = image
-            button.toolTip = schedule.skipsUpcomingBreak ? "The next scheduled break will be skipped." : "LookAway: " + text
+            button.toolTip = schedule.skipsUpcomingBreak
+                ? "LookAway: " + text + ". The next scheduled break will be skipped."
+                : "LookAway: " + text
         }
         pauseItem?.title = schedule.phase == .paused ? "Resume Timer" : "Pause Timer"
         pauseItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
         breakItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
+        settingsItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
     }
 
     private func formatTime(_ seconds: Int) -> String {
@@ -205,5 +244,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.removeObserver(self)
         popupBanner.hide()
         overlayController.hide(cleanupOnly: true)
+        settingsWindowController?.close()
     }
 }

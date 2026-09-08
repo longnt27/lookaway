@@ -15,7 +15,7 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
 ```
 
-The shared scheme runs `LookAwayTests`, not the generated `LookAwayUITests` starter target. Scheduling tests supply explicit timestamps. Most presentation tests supply an empty display list and drive the controller directly; the panel-configuration test constructs an AppKit panel. These are not end-to-end tests of typing in another application or clicking controls on physical displays.
+The shared scheme runs `LookAwayTests`, not the generated `LookAwayUITests` starter target. Scheduling tests supply explicit timestamps. Most presentation tests supply an empty display list and drive the controller directly; panel and settings-window tests construct AppKit windows. Preference tests use isolated defaults suites. These are not end-to-end tests of typing in another application or clicking controls on physical displays.
 
 GitHub Actions also builds both `arm64` and `x86_64` in Release configuration. Building an architecture is not the same as running the UI on that hardware. Download `macos-test-results` from the workflow run to inspect the `.xcresult` and logs in Xcode.
 
@@ -23,7 +23,21 @@ GitHub Actions also builds both `arm64` and `x86_64` in Release configuration. B
 
 This is a checklist to run, not a record of checks already completed. Record the commit, macOS version, hardware, Xcode version, display layout/scaling, and pass/fail observations with a release or pull request.
 
-For a faster local pass, temporarily change the defaults in `LookAway/BreakSchedule.swift` to a 20-second work session, 10-second break, 5-second blink interval, 10-second posture interval, and 5-second warning. Leave reminders at 2 seconds. This makes warning and reminder overlap easy to exercise; the **+ 5 Minutes** action still adds a real five minutes. Restore the production defaults before running the automated suite or committing: tests deliberately assert those defaults.
+For a faster local pass, use Settings to choose a two-minute work session, 10-second break, one-minute blink and posture intervals, and a five-second warning. Leave reminder display time at two seconds. Both reminders should appear together after one minute. The **+ 5 Minutes** action still adds a real five minutes. Restore your preferred settings afterward; no source changes or rebuild are needed.
+
+### Settings
+
+- [ ] Open **Settings…** from the menu bar. One usable window opens, and repeated commands preserve unsaved edits rather than creating duplicates. Command-comma works while LookAway is active.
+- [ ] Change every numeric control. Units are clear and values remain within bounds. Reducing work to one minute clamps the warning below 60 seconds.
+- [ ] Change values and use **Cancel**, Escape, or the window close button. Reopen: saved preferences and the running schedule are unchanged.
+- [ ] Save custom values, quit, and relaunch. Values and toggles persist, and the new work session starts with the saved interval.
+- [ ] Disable blink, posture, and warnings separately and together. Disabled reminders do not appear; breaks still occur. Reenabling retains the selected intervals.
+- [ ] Save timing changes while paused. The timer stays paused with the new full interval; resuming uses the new reminder intervals.
+- [ ] Save timing changes while a warning/reminder is visible. The old presentation disappears and cannot affect the new session.
+- [ ] Keep Settings open until a break starts. The break completes normally; saving afterward uses the selected values. Settings cannot open over an active break from the menu.
+- [ ] Hide/show the menu-bar countdown. The timer does not restart; the icon stays clickable and its tooltip/accessibility label reports the timer state.
+- [ ] **Restore Defaults** does not apply until **Save**. Canceling a reset preserves custom values; saving a reset restores the documented defaults.
+- [ ] Resize the settings window; all controls and footer buttons remain reachable. Test light/dark appearance, keyboard navigation, and VoiceOver labels.
 
 ### Work, pause, and sleep
 
@@ -33,13 +47,13 @@ For a faster local pass, temporarily change the defaults in `LookAway/BreakSched
 - [ ] Sleep during work, then wake. Remaining work time is preserved; overdue reminders do not arrive in a burst.
 - [ ] Sleep while manually paused. The app is still paused after waking.
 - [ ] Sleep during a break. The overlay is gone on wake and a fresh work session begins.
-- [ ] Quit while a warning or overlay is visible. All LookAway windows disappear and do not return. Relaunch starts a fresh work session.
+- [ ] Quit while a warning or overlay is visible. All LookAway windows disappear and do not return. Relaunch starts a fresh work session with saved preferences.
 
 ### Warnings and scheduling
 
 - [ ] A warning appears at the warning threshold. **I Know**, **X**, and the ten-second timeout leave the break deadline unchanged.
 - [ ] **Skip Break** dismisses every copy of the warning. The current countdown continues; at zero it starts a full work session without showing a break. The following scheduled break still occurs.
-- [ ] **+ 5 Minutes** extends the existing deadline by exactly five minutes, dismisses the warning, and rearms the warning for one minute before the new deadline (or the locally configured warning interval).
+- [ ] **+ 5 Minutes** extends the existing deadline by exactly five minutes, dismisses the warning, and rearms the warning for the configured warning interval before the new deadline.
 - [ ] A warning disappears when a manual break starts, the app pauses, or the Mac sleeps. It must not act on the later session.
 - [ ] After choosing **Skip Break**, choose **Start Break Now**. The manual break must start; the old skip must not suppress the next scheduled break.
 - [ ] Start a break while paused. After completion, a new work session starts running, as documented.
@@ -55,7 +69,7 @@ For a faster local pass, temporarily change the defaults in `LookAway/BreakSched
 
 ### Focus and interaction
 
-- [ ] Type in another application when a warning appears. LookAway does not activate and typing stays in that application. Repeat for both kinds of reminder and a scheduled break.
+- [ ] Type in another application when a warning appears. LookAway does not activate and typing stays in that application. Repeat for both kinds of reminder and a scheduled break. Opening Settings intentionally activates LookAway.
 - [ ] Click **I Know**, **Skip Break**, and **+ 5 Minutes** separately. Each action works on its first click and the foreground application is not unexpectedly activated or deactivated afterward.
 - [ ] Click **I'm ready** during a break. The action works without bringing up a normal LookAway application window.
 - [ ] During a brief reminder, mouse clicks pass to the underlying application. During a break, its visible controls receive mouse input.
@@ -71,4 +85,4 @@ For a faster local pass, temporarily change the defaults in `LookAway/BreakSched
 - [ ] Exercise multiple Spaces and a full-screen foreground application. Record any platform-specific visibility or focus differences.
 - [ ] Enable Reduce Motion and confirm the warning/break fades are suppressed. Use VoiceOver to check the countdown and button labels; verify the controls remain usable with your keyboard-navigation settings.
 
-Restore the normal defaults, rebuild, and run the automated tests after this pass. Keep unverified manual checks unchecked.
+Restore your preferred settings after this pass. Keep unverified manual checks unchecked.
