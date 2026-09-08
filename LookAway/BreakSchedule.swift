@@ -102,7 +102,7 @@ struct BreakSchedule {
         return true
     }
 
-    /// A manual break must not consume a pending skip or restart an active break.
+    /// A manual break overrides a pending skip but never restarts an active break.
     @discardableResult
     mutating func startBreakNow() -> Bool {
         guard phase != .onBreak, !isSleeping else { return false }
