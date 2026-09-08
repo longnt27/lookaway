@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS build and regression tests
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Run regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild test \
+            -project LookAway.xcodeproj \
+            -scheme LookAway \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -parallel-testing-enabled NO \
+            -enableCodeCoverage YES \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath build/TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= \
+            2>&1 | tee build/test.log
+      - name: Build universal release
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project LookAway.xcodeproj \
+            -scheme LookAway \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath build/DerivedData \
+            CLANG_ENABLE_CODE_COVERAGE=NO GCC_INSTRUMENT_PROGRAM_FLOW_ARCS=NO \
+            ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= \
+            2>&1 | tee build/release.log
+          xcrun lipo \
+            build/DerivedData/Build/Products/Release/LookAway.app/Contents/MacOS/LookAway \
+            -verify_arch arm64 x86_64
+      - name: Upload test results and build logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-test-results
+          path: |
+            build/TestResults.xcresult
+            build/test.log
+            build/release.log
+          if-no-files-found: warn
+          retention-days: 7

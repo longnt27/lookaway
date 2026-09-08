@@ -1,178 +1,177 @@
-// OverlayController.swift
-
-import SwiftUI
 import AppKit
+import SwiftUI
 
-public final class OverlayViewModel: ObservableObject {
-    @Published public var remaining: Int
-    @Published public var message: String
-    @Published public var shouldDismiss: Bool = false // ADD: Cờ hiệu để ra lệnh cho View tự đóng
-    
-    public init(_ remaining: Int, message: String = "") {
-        self.remaining = remaining
+@MainActor
+final class OverlayViewModel: ObservableObject {
+    @Published var remaining: Int
+    @Published var shouldDismiss = false
+    let duration: Int
+    let message: String
+
+    init(duration: Int, message: String = "") {
+        self.duration = max(0, duration)
+        self.remaining = max(0, duration)
         self.message = message
     }
+
+    var readyDelayRemaining: Int {
+        max(0, 3 - (duration - remaining))
+    }
 }
 
-enum OverlayMode {
+enum OverlayMode: Equatable {
     case breakSession(seconds: Int)
     case reminder(message: String, duration: Int)
+
+    var duration: Int {
+        switch self {
+        case .breakSession(let seconds): return seconds
+        case .reminder(_, let duration): return duration
+        }
+    }
 }
 
-final class OverlayController: ObservableObject {
-    private struct Entry {
-        let window: OverlayWindow
-        let hosting: NSHostingController<OverlayView>
-    }
-
-    private var entries: [Entry] = []
-    private var vm: OverlayViewModel?
+/// Owns completion for the whole presentation, not for each display's view.
+@MainActor
+final class OverlayController {
+    private var windows: [OverlayWindow] = []
+    private var viewModel: OverlayViewModel?
     private var timer: DispatchSourceTimer?
+    private var dismissWorkItem: DispatchWorkItem?
+    private var deadline: TimeInterval?
     private var onHideCallback: (() -> Void)?
     private var onTickCallback: ((Int) -> Void)?
+    private let clock: () -> TimeInterval
+    private let screens: () -> [NSScreen]
+    private let dismissalDuration: TimeInterval
+
+    private(set) var presentationID: UUID?
+    private(set) var currentMode: OverlayMode?
+
+    init(clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         screens: @escaping () -> [NSScreen] = { NSScreen.screens },
+         dismissalDuration: TimeInterval = 0.5) {
+        self.clock = clock
+        self.screens = screens
+        self.dismissalDuration = max(0, dismissalDuration)
+    }
+
+    var isShowingBreak: Bool {
+        if case .breakSession = currentMode { return true }
+        return false
+    }
+
+    var remainingSeconds: Int { viewModel?.remaining ?? 0 }
 
     func show(mode: OverlayMode,
               onHide: (() -> Void)? = nil,
               onTick: ((Int) -> Void)? = nil) {
+        // Neither a reminder nor a repeated manual action may replace a break.
+        guard !isShowingBreak else { return }
         hide(cleanupOnly: true)
 
-        self.onHideCallback = onHide
-        self.onTickCallback = onTick
+        let id = UUID()
+        presentationID = id
+        currentMode = mode
+        onHideCallback = onHide
+        onTickCallback = onTick
+        let message: String
+        if case .reminder(let text, _) = mode { message = text } else { message = "" }
+        viewModel = OverlayViewModel(duration: mode.duration, message: message)
+        deadline = clock() + TimeInterval(max(0, mode.duration))
+        if mode.duration > 0 { createWindows() }
+        tick()
 
-        switch mode {
-        case .breakSession(let seconds):
-            let viewModel = OverlayViewModel(seconds)
-            self.vm = viewModel
-            createOverlayWindows(with: viewModel)
-            startTimer(countdown: true)
+        guard presentationID == id, viewModel?.shouldDismiss == false else { return }
+        let source = DispatchSource.makeTimerSource(queue: .main)
+        source.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(50))
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        timer = source
+        source.resume()
+    }
 
-        case .reminder(let message, let duration):
-            let viewModel = OverlayViewModel(duration, message: message)
-            self.vm = viewModel
-            createOverlayWindows(with: viewModel)
-            startTimer(countdown: false)
+    func tick() {
+        guard let model = viewModel, let deadline = deadline,
+              let id = presentationID, !model.shouldDismiss else { return }
+        model.remaining = Int(ceil(max(0, deadline - clock())))
+        onTickCallback?(model.remaining)
+        if model.remaining == 0 { dismiss(presentationID: id) }
+    }
+
+    /// Old buttons and cancelled animation callbacks cannot close a newer overlay.
+    func dismiss(presentationID id: UUID) {
+        guard presentationID == id, let model = viewModel, !model.shouldDismiss else { return }
+        stopTimer()
+        model.shouldDismiss = true
+        guard !windows.isEmpty, dismissalDuration > 0 else {
+            hide()
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self = self, self.presentationID == id else { return }
+                self.hide()
+            }
+        }
+        dismissWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + dismissalDuration, execute: work)
+    }
+
+    func refreshScreens() {
+        closeWindows()
+        guard viewModel?.shouldDismiss == false else { return }
+        createWindows()
+    }
+
+    func hide(cleanupOnly: Bool = false) {
+        stopTimer()
+        dismissWorkItem?.cancel()
+        dismissWorkItem = nil
+        let completion = onHideCallback
+        // Clear everything before calling client code, which may show another overlay.
+        presentationID = nil
+        currentMode = nil
+        deadline = nil
+        onHideCallback = nil
+        onTickCallback = nil
+        viewModel = nil
+        closeWindows()
+        if !cleanupOnly { completion?() }
+    }
+
+    private func createWindows() {
+        guard let model = viewModel, let mode = currentMode, let id = presentationID else { return }
+        for screen in screens() {
+            let view = OverlayView(viewModel: model, mode: mode, onDone: { [weak self] in
+                self?.dismiss(presentationID: id)
+            })
+            let window = OverlayWindow(contentRect: screen.frame,
+                                       styleMask: [.borderless, .nonactivatingPanel],
+                                       backing: .buffered, defer: false)
+            window.configureForOverlay()
+            window.level = .screenSaver
+            window.hasShadow = false
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+            if case .reminder = mode { window.ignoresMouseEvents = true }
+            window.contentViewController = NSHostingController(rootView: view)
+            window.setFrame(screen.frame, display: true)
+            window.orderFrontRegardless()
+            windows.append(window)
         }
     }
 
-    private func createOverlayWindows(with viewModel: OverlayViewModel) {
-            for screen in NSScreen.screens {
-                let view = OverlayView(
-                    viewModel: viewModel,
-                    mode: modeFromVM(viewModel),
-                    onDone: { completion in
-                        completion() // gọi animation xong
-                        // FIX: Logic hide() được chuyển vào đây, sẽ được gọi bởi View
-                        // sau khi animation kết thúc.
-                        self.hide(cleanupOnly: false)
-                    }
-                )
-
-                let hosting = NSHostingController(rootView: view)
-
-                let screenFrame = screen.frame
-                let window = OverlayWindow(
-                    contentRect: screenFrame,
-                    styleMask: [.borderless],
-                    backing: .buffered,
-                    defer: false,
-                    screen: screen
-                )
-
-                window.isOpaque = false
-                window.hasShadow = false
-                window.backgroundColor = .clear
-                window.level = .screenSaver
-                window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-
-                window.contentViewController = hosting
-
-                if let cv = window.contentView {
-                    hosting.view.frame = cv.bounds
-                    hosting.view.autoresizingMask = [.width, .height]
-                }
-
-                window.setFrame(screenFrame, display: true)
-                window.makeKeyAndOrderFront(nil)
-
-                entries.append(Entry(window: window, hosting: hosting))
-            }
-
-            NSApp.activate(ignoringOtherApps: true)
-        }
-
-
-    private func modeFromVM(_ vm: OverlayViewModel) -> OverlayMode {
-        if vm.message.isEmpty {
-            return .breakSession(seconds: vm.remaining)
-        } else {
-            return .reminder(message: vm.message, duration: vm.remaining)
-        }
-    }
-
-    private func startTimer(countdown: Bool) {
-        if let t = timer {
-            t.cancel()
-            timer = nil
-        }
-
-        guard let vm = vm else { return }
-
-        timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
-
-        if countdown {
-            timer?.schedule(deadline: .now() + 1, repeating: 1.0)
-            timer?.setEventHandler { [weak self] in
-                guard let self = self, let vm = self.vm else { return }
-                vm.remaining -= 1
-                self.onTickCallback?(vm.remaining)
-                if vm.remaining <= 0 {
-                    // FIX: Thay vì gọi hide() trực tiếp, chúng ta ra lệnh cho View bắt đầu đóng.
-                    // View sẽ gọi lại onDone (chứa hàm hide()) sau khi animation hoàn tất.
-                    DispatchQueue.main.async {
-                        vm.shouldDismiss = true
-                        self.stopTimer() // Dừng timer ngay lập tức
-                    }
-                }
-            }
-        } else { // Reminder timer
-            timer?.schedule(deadline: .now() + .seconds(vm.remaining))
-            timer?.setEventHandler { [weak self] in
-                guard let self = self, let vm = self.vm else { return }
-                // FIX: Tương tự như trên, ra lệnh cho View đóng.
-                DispatchQueue.main.async {
-                    vm.shouldDismiss = true
-                    self.stopTimer()
-                }
-            }
-        }
-
-        timer?.resume()
-    }
-    
-    // ADD: Hàm helper để dừng timer
     private func stopTimer() {
         timer?.cancel()
         timer = nil
     }
 
-    func hide(cleanupOnly: Bool = false) {
-        // FIX: Đổi tên hàm stopTimer() để tránh nhầm lẫn
-        stopTimer()
-
-        for e in entries {
-            // Đảm bảo rằng window được đóng một cách an toàn trên main thread
-            DispatchQueue.main.async {
-                e.window.orderOut(nil)
-            }
+    private func closeWindows() {
+        for window in windows {
+            window.orderOut(nil)
+            window.contentViewController = nil
         }
-        entries.removeAll()
-
-        if !cleanupOnly {
-            onHideCallback?()
-        }
-
-        onHideCallback = nil
-        onTickCallback = nil
-        vm = nil
+        windows.removeAll()
     }
 }

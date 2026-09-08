@@ -1,38 +1,31 @@
-LookAway - Save your office life (MacOS)
+# LookAway
+
+A native macOS menu-bar app for screen breaks, blink reminders, and posture checks.
+
+Take a **30-second break every 30 minutes**, with blink reminders every **5 minutes** and posture reminders every **10 minutes**. Breaks appear across connected displays. No account or internet connection required.
+
+## Install
+
+Requires **macOS 15.4+** and **Xcode 16.4 or a compatible newer version**. Installation currently requires building from source; no prebuilt download is available.
+
+1. Download this repository using **Code > Download ZIP**, extract it, and open `LookAway.xcodeproj` in Xcode.
+2. Select the **LookAway** scheme and **My Mac**. Under the app target's **Signing & Capabilities**, choose **Sign to Run Locally** or your development team.
+3. Choose **Product > Run**. The countdown appears in your menu bar, not the Dock.
+
+To install outside Xcode, right-click **Products > LookAway.app**, choose **Show in Finder**, and copy the app to **Applications**.
+
+## Use
+
+Click the menu-bar countdown to **Start Break Now**, **Pause Timer**, **Resume Timer**, or **Quit LookAway**.
+
+Before a scheduled break, choose **Skip Break** to skip just the next break, or **+ 5 Minutes** to postpone it. During a break, **I'm ready** lets you finish early after three seconds.
+
+Timers pause while your Mac sleeps. Reopening the app starts a fresh session. There is no settings window yet; changing intervals requires rebuilding.
+
+## Support
+
+[Report an issue](https://github.com/longnt27/lookaway/issues) · [Developer guide](docs/development.md)
+
 ---
 
-# Introduction
-
-This app was motivated from the LookAway app from Mystical Bits, LLC.
-I found that app really helpful, but I was too broke for it, so I replicated
-the core features into this app. It is recommended to use the official app
-to support the authors, and for better compatibility and usage experience.
-
-# Core futures
-
-As introduced, this app replicated core futures from the LookAway app from
-Mystical Bits, LLC. Those include:
-
-1. Run a 30-minute timer, followed by a 30-second break, repeatedly
-2. The break session blocks all interactions by creating an overlay on screen
-3. User has the choice to skip break session after 3 seconds
-4. Every 3 and 5 minutes, an overlay shows up to remind user to blink and adjust
-posture, respectively
-5. 1 minute before the start of the break session, there is a pop up showing to
-let user add 5 minutes to current working session, or ignore the next break session.
-
-# Installation
-
-Open with XCode and compile an executable, then move it to Application
-
-# Future work
-
-The app currently has several bugs:
-
-1. It takes away focus. Everytime it appears by any kind (popup, overlay),
-the current app loses its focus, and user needs to click on it again, it's
-kinda annoying
-2. The ignoring next break session does not work.
-
-However, due to the deprecation of my laptop, it's a nightmare to work with XCode,
-so I will stop developing this until I get a new computer.
+An independent project inspired by LookAway from Mystical Bits, LLC. Not affiliated with or endorsed by the commercial app.

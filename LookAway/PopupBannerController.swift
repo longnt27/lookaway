@@ -1,93 +1,85 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
+struct BannerLayout {
+    static func frame(in visibleFrame: NSRect) -> NSRect {
+        let width = min(380, max(0, visibleFrame.width - 32))
+        let height = min(180, max(0, visibleFrame.height - 32))
+        return NSRect(x: visibleFrame.midX - width / 2,
+                      y: max(visibleFrame.minY, visibleFrame.maxY - height - 20),
+                      width: width, height: height)
+    }
+}
+
+@MainActor
 final class PopupBannerController {
-    private struct Entry {
-        let window: OverlayWindow
-        let hosting: NSHostingController<PopupBannerView>
+    private var windows: [OverlayWindow] = []
+    private var dismissWorkItem: DispatchWorkItem?
+    private let screens: () -> [NSScreen]
+    private(set) var presentationID: UUID?
+
+    init(screens: @escaping () -> [NSScreen] = { NSScreen.screens }) {
+        self.screens = screens
     }
 
-    private var entries: [Entry] = []
-    private var dismissWorkItem: DispatchWorkItem?
+    func show(message: String,
+              onKnow: @escaping () -> Void,
+              onSkipBreak: @escaping () -> Void,
+              onAddFiveMinutes: @escaping () -> Void,
+              duration: TimeInterval = 10) {
+        hide()
+        guard duration > 0 else { return }
+        let id = UUID()
+        presentationID = id
 
-    func show(
-        message: String,
-        onKnow: @escaping () -> Void,
-        onSkipBreak: @escaping () -> Void,
-        onAddFiveMinutes: @escaping () -> Void,
-        duration: TimeInterval = 10
-    ) {
-        hide(cleanupOnly: true)
-
-        for screen in NSScreen.screens {
+        for screen in screens() {
             let view = PopupBannerView(
                 message: message,
-                onKnow: {
-                    onKnow()
-                    self.hide()
-                },
-                onSkipBreak: {
-                    onSkipBreak()
-                    self.hide()
-                },
-                onAddFiveMinutes: {
-                    onAddFiveMinutes()
-                    self.hide()
-                }
+                onKnow: { [weak self] in self?.performAction(for: id, onKnow) },
+                onSkipBreak: { [weak self] in self?.performAction(for: id, onSkipBreak) },
+                onAddFiveMinutes: { [weak self] in self?.performAction(for: id, onAddFiveMinutes) }
             )
-
-            let hosting = NSHostingController(rootView: view)
-            hosting.view.wantsLayer = true
-            hosting.view.layer?.cornerRadius = 12
-            hosting.view.layer?.masksToBounds = true
-
-            let screenFrame = screen.frame
-            let bannerWidth: CGFloat = 360
-            let bannerHeight: CGFloat = 200
-            let xPos = (screenFrame.width - bannerWidth) / 2
-            let yPos = screenFrame.height - bannerHeight - 50
-
-            let window = OverlayWindow(
-                contentRect: NSRect(x: xPos, y: yPos, width: bannerWidth, height: bannerHeight),
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false,
-                screen: screen
-            )
-
-            window.isOpaque = false
-            window.backgroundColor = .clear
+            let frame = BannerLayout.frame(in: screen.visibleFrame)
+            let window = OverlayWindow(contentRect: frame,
+                                       styleMask: [.borderless, .nonactivatingPanel],
+                                       backing: .buffered, defer: false)
+            window.configureForOverlay()
             window.level = .floating
             window.hasShadow = true
-            window.collectionBehavior = [.canJoinAllSpaces, .transient]
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+            window.contentViewController = NSHostingController(rootView: view)
+            // Set a global frame without a screen-relative initializer offset.
+            window.setFrame(frame, display: true)
+            window.orderFrontRegardless()
+            windows.append(window)
+        }
 
-            window.contentViewController = hosting
-            if let cv = window.contentView {
-                hosting.view.frame = cv.bounds
-                hosting.view.autoresizingMask = [.width, .height]
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self = self, self.presentationID == id else { return }
+                self.hide()
             }
-
-            window.makeKeyAndOrderFront(nil)
-
-            entries.append(Entry(window: window, hosting: hosting))
         }
-
-        NSApp.activate(ignoringOtherApps: true)
-
-        // Tự ẩn sau duration giây
-        dismissWorkItem = DispatchWorkItem {
-            self.hide()
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: dismissWorkItem!)
+        dismissWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
     }
 
-    func hide(cleanupOnly: Bool = false) {
+    /// A click on any display consumes the warning once. Clear the old presentation
+    /// first, because the action may synchronously show a new warning or a break.
+    func performAction(for id: UUID, _ action: () -> Void) {
+        guard presentationID == id else { return }
+        hide()
+        action()
+    }
+
+    func hide() {
+        presentationID = nil
         dismissWorkItem?.cancel()
         dismissWorkItem = nil
-
-        for entry in entries {
-            entry.window.orderOut(nil)
+        for window in windows {
+            window.orderOut(nil)
+            window.contentViewController = nil
         }
-        entries.removeAll()
+        windows.removeAll()
     }
 }
