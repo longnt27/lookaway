@@ -20,7 +20,7 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Show toolchain
@@ -41,7 +41,7 @@ jobs:
             -derivedDataPath build/DerivedData \
             -resultBundlePath build/TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= \
-            | tee build/test.log
+            2>&1 | tee build/test.log
       - name: Build universal release
         shell: bash
         run: |
@@ -52,13 +52,15 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=macOS' \
             -derivedDataPath build/DerivedData \
-            -enableCodeCoverage NO \
+            CLANG_ENABLE_CODE_COVERAGE=NO GCC_INSTRUMENT_PROGRAM_FLOW_ARCS=NO \
             ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= \
-            | tee build/release.log
+            2>&1 | tee build/release.log
+          xcrun lipo -verify_arch arm64 x86_64 \
+            build/DerivedData/Build/Products/Release/LookAway.app/Contents/MacOS/LookAway
       - name: Upload test results and build logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: macos-test-results
           path: |

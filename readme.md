@@ -84,7 +84,7 @@ xcodebuild build \
   -configuration Release \
   -destination 'generic/platform=macOS' \
   -derivedDataPath build/DerivedData \
-  -enableCodeCoverage NO \
+  CLANG_ENABLE_CODE_COVERAGE=NO GCC_INSTRUMENT_PROGRAM_FLOW_ARCS=NO \
   ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
 ```
