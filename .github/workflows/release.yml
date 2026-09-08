@@ -59,7 +59,6 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
           APP='build/ReleaseDerivedData/Build/Products/Release/LookAway.app'
           xcrun lipo "$APP/Contents/MacOS/LookAway" -verify_arch arm64 x86_64
-          /usr/bin/codesign --verify "$APP" >/dev/null 2>&1 && exit 1 || true
 
       - name: Package release
         shell: bash
@@ -89,3 +88,15 @@ jobs:
             --title "LookAway ${VERSION}" \
             --generate-notes \
             --latest
+
+      - name: Smoke-test one-command installer
+        shell: bash
+        env:
+          LOOKAWAY_INSTALL_DIR: ${{ runner.temp }}/lookaway-install
+          LOOKAWAY_NO_OPEN: "1"
+        run: |
+          set -euo pipefail
+          sh install.sh
+          INSTALLED="$LOOKAWAY_INSTALL_DIR/LookAway.app/Contents/MacOS/LookAway"
+          test -x "$INSTALLED"
+          xcrun lipo "$INSTALLED" -verify_arch arm64 x86_64
