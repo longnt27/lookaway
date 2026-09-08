@@ -126,8 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !reminders.isEmpty {
             overlayController.show(mode: .reminder(message: reminders.joined(separator: "\n"),
                                                    duration: schedule.configuration.reminderSeconds), settings: settings)
-            // A simultaneous warning/reminder gets one sound, not overlapping sounds.
-            if !events.contains(.warning) { soundPlayer.play(event: .reminder, settings: settings) }
+        }
+        if let event = SoundEvent.selected(for: events, settings: settings) {
+            soundPlayer.play(event: event, settings: settings)
         }
         updateStatusBar()
     }
@@ -148,7 +149,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.tick()
             }, settings: settings
         )
-        soundPlayer.play(event: .warning, settings: settings)
     }
 
     private func presentBreak() {

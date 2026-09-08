@@ -28,6 +28,14 @@ enum SoundEvent: CaseIterable {
         case .reminder: return settings.soundOnReminder
         }
     }
+
+    /// Select at most one enabled sound; a muted warning must not suppress a reminder sound.
+    static func selected(for events: [BreakSchedule.Event], settings: AppSettings) -> SoundEvent? {
+        if events.contains(.warning), settings.soundOnWarning { return .warning }
+        if settings.soundOnReminder,
+           events.contains(.blinkReminder) || events.contains(.postureReminder) { return .reminder }
+        return nil
+    }
 }
 
 @MainActor
