@@ -7,7 +7,8 @@
       </BuildActionEntry>
     </BuildActionEntries>
   </BuildAction>
-  <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES" codeCoverageEnabled="YES">
+  <!-- CI enables coverage on the test command, not on ordinary Release builds. -->
+  <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES" codeCoverageEnabled="NO">
     <Testables>
       <TestableReference skipped="NO" parallelizable="NO">
         <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="84DDB6AA2E49A377000D2BD8" BuildableName="LookAwayTests.xctest" BlueprintName="LookAwayTests" ReferencedContainer="container:LookAway.xcodeproj"/>
