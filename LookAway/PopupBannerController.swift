@@ -2,12 +2,16 @@ import AppKit
 import SwiftUI
 
 struct BannerLayout {
-    static func frame(in visibleFrame: NSRect) -> NSRect {
+    static func frame(in visibleFrame: NSRect, position: BannerPosition = .top) -> NSRect {
         let width = min(380, max(0, visibleFrame.width - 32))
         let height = min(180, max(0, visibleFrame.height - 32))
-        return NSRect(x: visibleFrame.midX - width / 2,
-                      y: max(visibleFrame.minY, visibleFrame.maxY - height - 20),
-                      width: width, height: height)
+        let y: CGFloat
+        switch position {
+        case .top: y = max(visibleFrame.minY, visibleFrame.maxY - height - 20)
+        case .center: y = visibleFrame.midY - height / 2
+        case .bottom: y = min(visibleFrame.maxY - height, visibleFrame.minY + 20)
+        }
+        return NSRect(x: visibleFrame.midX - width / 2, y: y, width: width, height: height)
     }
 }
 
@@ -26,20 +30,23 @@ final class PopupBannerController {
               onKnow: @escaping () -> Void,
               onSkipBreak: @escaping () -> Void,
               onAddFiveMinutes: @escaping () -> Void,
-              duration: TimeInterval = 10) {
+              duration: TimeInterval? = nil,
+              settings: AppSettings = .defaults) {
         hide()
-        guard duration > 0 else { return }
+        let value = settings.normalized
+        let delay = duration ?? TimeInterval(value.warningDuration)
+        guard delay.isFinite, delay > 0 else { return }
         let id = UUID()
         presentationID = id
-
-        for screen in screens() {
+        for screen in DisplaySelector.select(value.breakDisplays, from: screens(), pointer: NSEvent.mouseLocation) {
             let view = PopupBannerView(
                 message: message,
                 onKnow: { [weak self] in self?.performAction(for: id, onKnow) },
                 onSkipBreak: { [weak self] in self?.performAction(for: id, onSkipBreak) },
-                onAddFiveMinutes: { [weak self] in self?.performAction(for: id, onAddFiveMinutes) }
+                onAddFiveMinutes: { [weak self] in self?.performAction(for: id, onAddFiveMinutes) },
+                settings: value
             )
-            let frame = BannerLayout.frame(in: screen.visibleFrame)
+            let frame = BannerLayout.frame(in: screen.visibleFrame, position: value.bannerPosition)
             let window = OverlayWindow(contentRect: frame,
                                        styleMask: [.borderless, .nonactivatingPanel],
                                        backing: .buffered, defer: false)
@@ -48,12 +55,10 @@ final class PopupBannerController {
             window.hasShadow = true
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
             window.contentViewController = NSHostingController(rootView: view)
-            // Set a global frame without a screen-relative initializer offset.
             window.setFrame(frame, display: true)
             window.orderFrontRegardless()
             windows.append(window)
         }
-
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self = self, self.presentationID == id else { return }
@@ -61,11 +66,9 @@ final class PopupBannerController {
             }
         }
         dismissWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    /// A click on any display consumes the warning once. Clear the old presentation
-    /// first, because the action may synchronously show a new warning or a break.
     func performAction(for id: UUID, _ action: () -> Void) {
         guard presentationID == id else { return }
         hide()

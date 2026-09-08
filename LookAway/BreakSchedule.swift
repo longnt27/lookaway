@@ -1,13 +1,20 @@
 import Foundation
 
-/// Timing defaults live here rather than being duplicated across UI controllers.
-struct BreakConfiguration {
+/// Scheduler configuration in seconds. AppSettings converts user-facing preferences.
+struct BreakConfiguration: Equatable {
     var workSeconds = 30 * 60
     var breakSeconds = 30
     var blinkSeconds = 5 * 60
     var postureSeconds = 10 * 60
     var warningSeconds = 60
     var reminderSeconds = 2
+    var blinkEnabled = true
+    var postureEnabled = true
+
+    var isValid: Bool {
+        workSeconds > 0 && breakSeconds > 0 && blinkSeconds > 0 && postureSeconds > 0
+            && warningSeconds >= 0 && reminderSeconds > 0
+    }
 }
 
 /// A clock-driven state machine. Callers supply monotonic time, so delayed timer
@@ -21,7 +28,7 @@ struct BreakSchedule {
         case warning, startBreak, skippedBreak, blinkReminder, postureReminder
     }
 
-    let configuration: BreakConfiguration
+    private(set) var configuration: BreakConfiguration
     private(set) var phase: Phase = .working
     private(set) var skipsUpcomingBreak = false
     private(set) var isSleeping = false
@@ -36,13 +43,30 @@ struct BreakSchedule {
     private var resumesAfterSleep = false
 
     init(configuration: BreakConfiguration = BreakConfiguration(), now: TimeInterval) {
-        precondition(configuration.workSeconds > 0 && configuration.breakSeconds > 0)
-        precondition(configuration.blinkSeconds > 0 && configuration.postureSeconds > 0)
-        precondition(configuration.warningSeconds >= 0 && configuration.reminderSeconds > 0)
+        precondition(configuration.isValid)
         self.configuration = configuration
         workDeadline = now + TimeInterval(configuration.workSeconds)
         blinkDeadline = now + TimeInterval(configuration.blinkSeconds)
         postureDeadline = now + TimeInterval(configuration.postureSeconds)
+    }
+
+    /// A timing change starts a fresh work session without unpausing the user.
+    /// During a break, the presentation keeps its original duration; new settings
+    /// take effect when that break finishes. Sleep/resume intent is preserved.
+    mutating func updateConfiguration(_ next: BreakConfiguration, at now: TimeInterval) {
+        precondition(next.isValid)
+        guard next != configuration else { return }
+        configuration = next
+        guard phase != .onBreak else { return }
+        if phase == .paused {
+            pausedWork = TimeInterval(next.workSeconds)
+            pausedBlink = TimeInterval(next.blinkSeconds)
+            pausedPosture = TimeInterval(next.postureSeconds)
+            skipsUpcomingBreak = false
+            hasWarned = false
+        } else {
+            startWork(at: now)
+        }
     }
 
     func remainingSeconds(at now: TimeInterval) -> Int {
@@ -70,17 +94,17 @@ struct BreakSchedule {
         }
 
         var events: [Event] = []
-        if !hasWarned, !skipsUpcomingBreak,
+        if configuration.warningSeconds > 0, !hasWarned, !skipsUpcomingBreak,
            workDeadline - now <= TimeInterval(configuration.warningSeconds) {
             hasWarned = true
             events.append(.warning)
         }
-        if now >= blinkDeadline {
+        if configuration.blinkEnabled, now >= blinkDeadline {
             // Do not replay a backlog of reminders after a delayed callback.
             blinkDeadline = now + TimeInterval(configuration.blinkSeconds)
             events.append(.blinkReminder)
         }
-        if now >= postureDeadline {
+        if configuration.postureEnabled, now >= postureDeadline {
             postureDeadline = now + TimeInterval(configuration.postureSeconds)
             events.append(.postureReminder)
         }

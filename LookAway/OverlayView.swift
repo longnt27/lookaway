@@ -8,8 +8,68 @@ struct VisualEffectBlur: NSViewRepresentable {
         view.state = .active
         return view
     }
-
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+struct OverlayBackground: View {
+    let settings: AppSettings
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        ZStack {
+            if reduceTransparency { Color.black } else { VisualEffectBlur() }
+            Color.black.opacity(Double(settings.dimmingPercent) / 100)
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+/// Shared by the real overlay and the settings preview. This view owns no timers or windows.
+struct BreakContent: View {
+    let settings: AppSettings
+    let remaining: Int
+    let readyDelay: Int
+    let canFinish: Bool
+    let onDone: () -> Void
+    var preview = false
+
+    private var scale: CGFloat { CGFloat(settings.textSizePercent) / 100 }
+
+    var body: some View {
+        VStack(spacing: preview ? 12 : 24) {
+            if settings.showClock {
+                Text(Date(), style: .time)
+                    .font(.system(size: (preview ? 16 : 28) * scale, weight: .medium))
+            }
+            Text(settings.breakMessage)
+                .font(.system(size: (preview ? 18 : 24) * scale, weight: .semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.7)
+            if settings.showBreakCountdown {
+                Text(CountdownText.format(remaining, showsSeconds: true))
+                    .font(.system(size: (preview ? 42 : 96) * scale, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .accessibilityLabel("Break time remaining")
+                    .accessibilityValue("\(remaining) seconds")
+            }
+            if settings.allowEarlyFinish {
+                Button(action: onDone) {
+                    Text(readyDelay > 0 ? "I'm ready (\(readyDelay))" : "I'm ready")
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, preview ? 8 : 14)
+                }
+                .buttonStyle(ReadyButtonStyle(disabled: !canFinish, compact: preview))
+                .disabled(!canFinish || preview)
+                .accessibilityIdentifier("finishBreak")
+            }
+        }
+        .padding(preview ? 16 : 32)
+        .frame(maxWidth: preview ? 420 : 760)
+        .foregroundStyle(.white)
+    }
 }
 
 struct OverlayView: View {
@@ -19,76 +79,54 @@ struct OverlayView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPresented = false
 
-    private var buttonDisabled: Bool {
-        viewModel.readyDelayRemaining > 0 || viewModel.shouldDismiss
+    private var isCompact: Bool {
+        if case .reminder = mode { return viewModel.settings.reminderStyle == .banner }
+        return false
     }
+
+    private var animate: Bool { viewModel.settings.animationsEnabled && !reduceMotion }
 
     var body: some View {
         ZStack {
-            VisualEffectBlur().ignoresSafeArea()
+            OverlayBackground(settings: viewModel.settings).ignoresSafeArea()
             if case .breakSession = mode {
-                VStack(spacing: 20) {
-                    Text(Date(), style: .time)
-                        .font(.system(size: 28, weight: .medium))
-                    Spacer()
-                    Text("Look away from your screen")
-                        .font(.system(size: 24, weight: .semibold))
-                    Text(timeString(viewModel.remaining))
-                        .font(.system(size: 96, weight: .heavy, design: .rounded))
-                        .monospacedDigit()
-                        .accessibilityLabel("Break time remaining")
-                        .accessibilityValue("\(viewModel.remaining) seconds")
-                    Spacer()
-                    Button(action: onDone) {
-                        Text(viewModel.readyDelayRemaining > 0
-                             ? "I'm ready (\(viewModel.readyDelayRemaining))"
-                             : "I'm ready")
-                            .frame(width: 200, height: 52)
-                    }
-                    .buttonStyle(ReadyButtonStyle(disabled: buttonDisabled))
-                    .disabled(buttonDisabled)
-                    .accessibilityIdentifier("finishBreak")
-                    Spacer()
-                }
-                .padding(.top, 50)
+                BreakContent(settings: viewModel.settings, remaining: viewModel.remaining,
+                             readyDelay: viewModel.readyDelayRemaining,
+                             canFinish: viewModel.canFinishEarly, onDone: onDone)
             } else {
                 Text(viewModel.message)
-                    .font(.system(size: 48, weight: .semibold))
+                    .font(.system(size: (isCompact ? 20 : 48) * CGFloat(viewModel.settings.textSizePercent) / 100,
+                                  weight: .semibold))
                     .multilineTextAlignment(.center)
-                    .padding(40)
+                    .lineLimit(isCompact ? 4 : 6)
+                    .minimumScaleFactor(0.6)
+                    .padding(isCompact ? 20 : 40)
             }
         }
         .foregroundStyle(.white)
-        .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: isCompact ? 16 : 0))
         .opacity(isPresented ? 1 : 0)
         .onAppear {
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
-                isPresented = true
-            }
+            withAnimation(animate ? .easeOut(duration: 0.3) : nil) { isPresented = true }
         }
         .onChange(of: viewModel.shouldDismiss) { _, shouldDismiss in
             guard shouldDismiss else { return }
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.5)) {
-                isPresented = false
-            }
+            withAnimation(animate ? .easeOut(duration: 0.5) : nil) { isPresented = false }
         }
-    }
-
-    private func timeString(_ seconds: Int) -> String {
-        let value = max(0, seconds)
-        return String(format: "%02d:%02d", value / 60, value % 60)
     }
 }
 
 struct ReadyButtonStyle: ButtonStyle {
     let disabled: Bool
+    var compact = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 20, weight: .semibold))
+            .font(.system(size: compact ? 14 : 20, weight: .semibold))
             .background(disabled ? Color.white.opacity(0.15) : Color.white)
             .foregroundStyle(disabled ? Color.white.opacity(0.5) : Color.black)
             .clipShape(RoundedRectangle(cornerRadius: 12))
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.8 : 1)
     }
 }
