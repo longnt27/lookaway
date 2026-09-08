@@ -2,87 +2,70 @@
 
 ## Automated checks
 
-From the repository root, run:
+Run the shared `LookAway` scheme with **Product > Test**, or use the [command-line test instructions](development.md#tests-and-contributions). GitHub Actions also builds universal arm64/x86_64 Release binaries and retains `.xcresult`, coverage, and logs.
 
-```sh
-xcodebuild test \
-  -project LookAway.xcodeproj \
-  -scheme LookAway \
-  -configuration Debug \
-  -destination 'platform=macOS' \
-  -parallel-testing-enabled NO \
-  -derivedDataPath build/DerivedData \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
-```
+Scheduling and working-hours tests inject timestamps and calendars; preference tests use isolated defaults suites. Presentation tests cover callbacks, layout calculations, and panel configuration. Login tests use injected service closures, never real registration. Window tests exercise creation and reuse, not end-to-end keyboard or VoiceOver behavior. Building for an architecture is not the same as running on that hardware.
 
-The shared scheme runs `LookAwayTests`, not the generated `LookAwayUITests` starter target. Scheduling tests supply explicit timestamps. Most presentation tests supply an empty display list and drive the controller directly; panel and settings-window tests construct AppKit windows. Preference tests use isolated defaults suites. These are not end-to-end tests of typing in another application or clicking controls on physical displays.
+## Manual release checklist
 
-GitHub Actions also builds both `arm64` and `x86_64` in Release configuration. Building an architecture is not the same as running the UI on that hardware. Download `macos-test-results` from the workflow run to inspect the `.xcresult` and logs in Xcode.
+These are checks to perform, not a record of completed tests. Record commit, macOS/Xcode versions, hardware, display layout/scaling, and observations. Leave unverified items unchecked.
 
-## Manual checks before a release
+For a fast pass, choose a two-minute work session, a ten-second break, one-minute blink/posture intervals, a five-second warning, and two-second reminder visibility. Disable working-hours restrictions initially. Restore your preferences afterward.
 
-This is a checklist to run, not a record of checks already completed. Record the commit, macOS version, hardware, Xcode version, display layout/scaling, and pass/fail observations with a release or pull request.
+### Settings and persistence
 
-For a faster local pass, use Settings to choose a two-minute work session, 10-second break, one-minute blink and posture intervals, and a five-second warning. Leave reminder display time at two seconds. Both reminders should appear together after one minute. The **+ 5 Minutes** action still adds a real five minutes. Restore your preferred settings afterward; no source changes or rebuild are needed.
+- [ ] All six tabs are reachable at the minimum window size. Forms scroll without hiding Save/Cancel. Numeric fields accept typed values and steppers; bounds and units are correct.
+- [ ] Reopening an already visible or minimized window keeps the same draft/window. Closing and reopening reloads saved values. Command-comma works while LookAway is active.
+- [ ] Cancel, Escape, and window-close discard draft changes without changing timers. Save persists every preference through a quit/relaunch.
+- [ ] Restore Defaults and each timing preset affect only the draft until Save. Presets retain unrelated settings. Reset/cancel never changes launch-at-login registration.
+- [ ] Reducing work duration clamps warning lead; reducing break duration clamps ready delay. Empty messages revert to defaults when saved; long/Unicode messages remain readable.
+- [ ] Save timing changes while paused: the timer remains paused with the new interval. Save during a running break: it retains its original duration and presentation.
+- [ ] Save appearance, sound, display, message, and menu-bar preferences: elapsed time and a pending skip remain unchanged. Old visible warning controls cannot act on later sessions.
+- [ ] Hiding countdown or seconds leaves a clickable status icon and useful tooltip/accessibility label. Start-paused takes effect on the next launch, not immediately.
 
-### Settings
+### Work, warnings, and sleep
 
-- [ ] Open **Settings…** from the menu bar. One usable window opens, and repeated commands preserve unsaved edits rather than creating duplicates. Command-comma works while LookAway is active.
-- [ ] Change every numeric control. Units are clear and values remain within bounds. Reducing work to one minute clamps the warning below 60 seconds.
-- [ ] Change values and use **Cancel**, Escape, or the window close button. Reopen: saved preferences and the running schedule are unchanged.
-- [ ] Save custom values, quit, and relaunch. Values and toggles persist, and the new work session starts with the saved interval.
-- [ ] Disable blink, posture, and warnings separately and together. Disabled reminders do not appear; breaks still occur. Reenabling retains the selected intervals.
-- [ ] Save timing changes while paused. The timer stays paused with the new full interval; resuming uses the new reminder intervals.
-- [ ] Save timing changes while a warning/reminder is visible. The old presentation disappears and cannot affect the new session.
-- [ ] Keep Settings open until a break starts. The break completes normally; saving afterward uses the selected values. Settings cannot open over an active break from the menu.
-- [ ] Hide/show the menu-bar countdown. The timer does not restart; the icon stays clickable and its tooltip/accessibility label reports the timer state.
-- [ ] **Restore Defaults** does not apply until **Save**. Canceling a reset preserves custom values; saving a reset restores the documented defaults.
-- [ ] Resize the settings window; all controls and footer buttons remain reachable. Test light/dark appearance, keyboard navigation, and VoiceOver labels.
+- [ ] Countdown starts at the configured interval, stays nonnegative, and continues while its menu is open.
+- [ ] Pause freezes work/reminder time and removes warnings/reminders. Resume preserves remaining time.
+- [ ] Sleep/wake preserves work time and a manual pause. Sleep during a break removes it and starts a fresh session on wake, without an end sound or a reminder burst.
+- [ ] The warning appears at the selected lead time and lasts the selected visibility duration. I Know, X, and timeout do not move the deadline.
+- [ ] Skip Break suppresses one break only. Turning off skipping removes that control; a previously selected skip remains pending until consumed or overridden by a manual break.
+- [ ] Postpone displays and adds the chosen number of minutes and rearms the warning. Test a value other than the five-minute default.
+- [ ] Repeated Start Break Now cannot restart an active break. Manual breaks override pending skips.
+- [ ] Quit during a warning, reminder, break, or sound preview: all windows/sounds stop and do not return. Relaunch uses saved preferences and a fresh session.
 
-### Work, pause, and sleep
+### Break screens and reminders
 
-- [ ] On launch, the menu-bar countdown starts at the configured work interval, without an extra ten seconds or a negative countdown.
-- [ ] Keep the menu open for several seconds. The countdown continues, and a due break is not deferred until the menu closes.
-- [ ] Pause during work. The remaining time freezes, any warning/reminder disappears, and no reminders arrive while paused. Resume preserves the remaining work and reminder time.
-- [ ] Sleep during work, then wake. Remaining work time is preserved; overdue reminders do not arrive in a burst.
-- [ ] Sleep while manually paused. The app is still paused after waking.
-- [ ] Sleep during a break. The overlay is gone on wake and a fresh work session begins.
-- [ ] Quit while a warning or overlay is visible. All LookAway windows disappear and do not return. Relaunch starts a fresh work session with saved preferences.
+- [ ] Early finish is enabled after the selected delay on every display. Zero permits immediate finish. Disabling early finish hides the button but the break still completes automatically.
+- [ ] Early finish and natural completion each start exactly one work session. Old or repeated clicks do not restart or close a newer session.
+- [ ] Clock and break-countdown visibility are independent and never prevent completion. Dimming, text size, and custom messages match the static preview.
+- [ ] Previewing appearance neither starts a break nor resets the work timer. The preview finish button cannot affect the real schedule.
+- [ ] Blink and posture toggles/intervals/messages are independent. Simultaneous reminders share a presentation. Neither compact nor full-screen reminders replace an active break.
+- [ ] Reminders pass clicks through; warning and break buttons accept the first click. Test custom text at maximum length and size in a compact reminder.
 
-### Warnings and scheduling
+### Working hours
 
-- [ ] A warning appears at the warning threshold. **I Know**, **X**, and the ten-second timeout leave the break deadline unchanged.
-- [ ] **Skip Break** dismisses every copy of the warning. The current countdown continues; at zero it starts a full work session without showing a break. The following scheduled break still occurs.
-- [ ] **+ 5 Minutes** extends the existing deadline by exactly five minutes, dismisses the warning, and rearms the warning for the configured warning interval before the new deadline.
-- [ ] A warning disappears when a manual break starts, the app pauses, or the Mac sleeps. It must not act on the later session.
-- [ ] After choosing **Skip Break**, choose **Start Break Now**. The manual break must start; the old skip must not suppress the next scheduled break.
-- [ ] Start a break while paused. After completion, a new work session starts running, as documented.
+- [ ] Outside selected hours, automatic breaks/reminders pause and the menu reports Outside hours. The timer resumes its remaining time when hours begin.
+- [ ] A manually paused timer never resumes automatically. Keep Paused during a scheduled pause prevents its later automatic resume.
+- [ ] Change/disable working hours while automatically paused: eligibility updates without resetting remaining work. A manual pause remains paused.
+- [ ] Test a daytime interval, overnight interval, Saturday-to-Sunday transition, equal times (whole selected day), and no selected days (no automatic activity).
+- [ ] Sleep and wake across a schedule boundary. Check local timezone/DST changes. No negative countdown or burst of reminders appears.
+- [ ] A break already in progress finishes when working hours end. Start Break Now remains available outside hours.
 
-### Break and reminder lifecycle
+### Login and sounds
 
-- [ ] Blink and posture reminders show the appropriate text. When due together, both messages appear in one overlay rather than one replacing the other.
-- [ ] A reminder that is already visible is replaced cleanly by a due or manual break. It must not later close the break.
-- [ ] No reminder replaces or interrupts an active break. **Start Break Now** and **Pause Timer** are unavailable during the break.
-- [ ] **I'm ready** is disabled for the first three seconds on all displays. It becomes available at the same time everywhere.
-- [ ] Early dismissal and automatic completion each remove all overlays and start exactly one fresh work session. Rapid repeated clicks must not restart that new session.
-- [ ] The break countdown and the menu-bar break time agree. Display changes do not reset either countdown or the ready-button delay.
+- [ ] With an installed, locally signed app, enable launch at login, inspect macOS Login Items, log out/in, and verify launch. Disable it and verify the next login does not launch it.
+- [ ] Denied approval/registration errors are visible rather than reporting success. Changing Login Items in System Settings is reflected when returning to LookAway.
+- [ ] Opening, closing, canceling, or restoring the Settings draft does not register/unregister the app. Only the explicit login toggle changes registration immediately.
+- [ ] Sounds are silent by default. Enable warning, break-start, break-end, and reminder sounds separately; only the selected events play.
+- [ ] Preview each sound at several volumes, including zero; closing Settings stops preview playback. Simultaneous warning/reminder events do not overlap sounds.
 
-### Focus and interaction
+### Displays, focus, and accessibility
 
-- [ ] Type in another application when a warning appears. LookAway does not activate and typing stays in that application. Repeat for both kinds of reminder and a scheduled break. Opening Settings intentionally activates LookAway.
-- [ ] Click **I Know**, **Skip Break**, and **+ 5 Minutes** separately. Each action works on its first click and the foreground application is not unexpectedly activated or deactivated afterward.
-- [ ] Click **I'm ready** during a break. The action works without bringing up a normal LookAway application window.
-- [ ] During a brief reminder, mouse clicks pass to the underlying application. During a break, its visible controls receive mouse input.
-- [ ] Do not treat a break as a keyboard lock: keyboard focus and system shortcuts are intentionally not comprehensively blocked.
-
-### Displays, Spaces, and accessibility
-
-- [ ] Test a single display, then an external display positioned to the left, right, and above the primary display. Warning banners stay near the top center of each display's usable area.
-- [ ] Break overlays cover each display and show the same time, including with different scaling and display sizes.
-- [ ] Dismiss a warning or break on a secondary display. All other copies disappear, and the action happens once.
-- [ ] Disconnect and reconnect a display during a break. The remaining countdown continues rather than restarting. No invisible window intercepts input on the remaining display.
-- [ ] Change resolution or display arrangement while a warning is visible. The warning is dismissed and cannot affect the next session.
-- [ ] Exercise multiple Spaces and a full-screen foreground application. Record any platform-specific visibility or focus differences.
-- [ ] Enable Reduce Motion and confirm the warning/break fades are suppressed. Use VoiceOver to check the countdown and button labels; verify the controls remain usable with your keyboard-navigation settings.
-
-Restore your preferred settings after this pass. Keep unverified manual checks unchecked.
+- [ ] Test all, primary, and pointer display selections independently for breaks/warnings and reminders. Moving the pointer after appearance does not move an existing presentation.
+- [ ] Test displays to the left, right, and above the primary monitor, different scaling, and top/center/bottom banner positions. Windows remain within the selected display's usable area.
+- [ ] Disconnect/reconnect or rearrange displays mid-break. Countdown and ready delay are preserved; warnings dismiss and no invisible window intercepts input.
+- [ ] Dismissing on one monitor removes all copies exactly once. Test multiple Spaces and a full-screen foreground app.
+- [ ] Type in another application when warnings/reminders/breaks appear: LookAway does not activate. Opening Settings intentionally does activate it. This is not a keyboard lock.
+- [ ] Disable animations, then independently enable system Reduce Motion. Fades are suppressed. Reduce Transparency replaces blur with a readable solid background.
+- [ ] Test Settings in light, dark, and system appearance, keyboard navigation and VoiceOver, including weekday toggles, typed numeric inputs, save errors, and launch approval status.

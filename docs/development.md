@@ -2,9 +2,9 @@
 
 For installation and everyday use, see the [README](../readme.md).
 
-## Toolchain
+## Toolchain and builds
 
-LookAway uses SwiftUI and AppKit, targets macOS 15.4 or later, and has no third-party dependencies. CI uses Xcode 16.4 with Swift 5 language mode. Building and running require a Mac.
+LookAway uses SwiftUI, AppKit, and ServiceManagement, targets macOS 15.4+, and has no third-party dependencies. CI uses Xcode 16.4 with Swift 5 language mode. Building and running require a Mac.
 
 ```sh
 git clone https://github.com/longnt27/lookaway.git
@@ -12,11 +12,9 @@ cd lookaway
 open LookAway.xcodeproj
 ```
 
-Select the shared **LookAway** scheme and **My Mac**. Configure **Sign to Run Locally** or your own development team under **Signing & Capabilities**. The project does not require a contributor's team ID.
+Select the shared **LookAway** scheme and **My Mac**. Configure **Sign to Run Locally** or your own development team under **Signing & Capabilities**. No contributor's team ID is required.
 
-## Command-line builds
-
-Run from the repository root to build both Apple Silicon and Intel architectures:
+To verify an unsigned universal build:
 
 ```sh
 xcodebuild build \
@@ -34,59 +32,62 @@ xcrun lipo \
   -verify_arch arm64 x86_64
 ```
 
-Output: `build/DerivedData/Build/Products/Release/LookAway.app`.
+Output: `build/DerivedData/Build/Products/Release/LookAway.app`. This is not a signed, notarized installer. Use local signing in Xcode for your Mac and configure signing/notarization before distribution. Do not disable system-wide security protections.
 
-This verifies an unsigned build; it does not produce a signed, notarized installer. Use local signing in Xcode for your own Mac, and configure signing and notarization before distributing a release. Do not disable system-wide security protections to launch a build.
+## Preferences
 
-## Settings and timing
+The six Settings tabs are General, Breaks, Reminders, Schedule, Appearance, and Sounds. The menu command and Command-comma open one reusable window. Opening Settings intentionally activates LookAway; reminder windows do not. Settings cannot be opened over an active break.
 
-Users configure the app through **Settings…** in the status menu. Command-comma opens the same window while LookAway is active. The menu command is unavailable during a break because its overlays would cover the settings window.
+`AppSettings` stores user-facing units, normalizes them, and converts scheduling values to `BreakConfiguration`. Preferences remain one JSON value at `UserDefaults["LookAway.settings.v1"]`. Older saves retain known fields and gain defaults for new ones. Unknown enum values fall back independently; malformed data falls back to defaults. Values are bounded before arithmetic. Unrelated defaults keys are never removed.
 
-[`AppSettings`](../LookAway/AppSettings.swift) stores user-facing units and converts them to [`BreakConfiguration`](../LookAway/BreakSchedule.swift). Preferences are encoded as one JSON value in `UserDefaults` under `LookAway.settings.v1`. Missing fields retain defaults; malformed data falls back to defaults. Both reads and writes normalize numeric values before scheduler arithmetic.
-
-| Preference | Allowed range |
+| Preference | Range / behavior |
 | --- | --- |
-| Work interval | 1–180 minutes |
-| Break duration | 5–600 seconds |
-| Blink/posture intervals | 1–120 minutes, independently enabled |
-| Warning lead time | 5–300 seconds, always shorter than the work interval |
-| Reminder display time | 1–15 seconds |
+| Work / break duration | 1–180 minutes / 5–600 seconds |
+| Blink / posture interval | 1–120 minutes; independently enabled |
+| Warning lead / visibility | 5–300 seconds, shorter than work / 3–30 seconds |
+| Postponement | 1–60 minutes |
+| Reminder visibility | 1–15 seconds |
+| Early-finish delay | 0–60 seconds, shorter than the break; early finish can be disabled |
+| Messages | 120 characters; whitespace normalized; empty means default |
+| Dimming / text size | 0–90% / 80–150% |
+| Sound volume | 0–100%; all four event sounds default off |
+| Working hours | Local weekday selection and minute-of-day boundaries |
 
-Disabling a reminder retains its selected interval. Disabling warnings maps to a zero warning interval in the scheduler. Banner visibility remains 10 seconds, configured in `PopupBannerController.show`; postponement remains five minutes.
+Timing presets change work/break durations and normalize dependent bounds, without replacing unrelated preferences. Disabling reminders retains their intervals. Zero warning lead in the scheduler disables warnings.
 
-The settings editor owns a draft. **Save** persists and applies it; **Cancel** or closing the window discards edits. **Restore Defaults** changes only the draft until saved. Reopening a visible window retains unsaved edits; reopening a closed window reloads saved values. Settings never clear unrelated `UserDefaults` keys.
+The editor owns a draft. Save persists/applies; Cancel or close discards edits; Restore Defaults only edits the draft. Reopening a visible window retains unsaved edits. Appearance and the static break preview reflect the draft without creating overlays or changing timers. Sound preview is an explicit temporary action.
 
-Saving a changed scheduling configuration starts a fresh work session and reminder intervals, clears a pending skip, and dismisses obsolete warnings/reminders. Paused timers remain paused, including across sleep. An active break keeps its existing overlay countdown and uses the new configuration after completion. Unchanged settings or a countdown-display-only change do not reset the session. Session progress itself is not persisted between launches.
+**Launch at login is the exception to draft editing.** `LoginItemController` reads `SMAppService.mainApp.status` and changes registration only on an explicit toggle. It is not stored in `AppSettings`, changed by Restore Defaults, or reverted by Cancel. Errors and required approval are shown, and status refreshes when Settings opens or LookAway becomes active. Use an installed, signed app to test actual registration. See Apple's [SMAppService documentation](https://developer.apple.com/documentation/servicemanagement/smappservice).
 
-### Scheduling behavior
+## Runtime semantics
 
-- Finishing a break starts a full work session and resets reminder intervals. Simultaneous blink/posture reminders share one overlay and cannot replace an active break.
-- **Skip Break** leaves the current countdown running. At zero, a fresh work session starts instead of a break. A manual break overrides a pending skip; repeated manual actions cannot restart an active break.
-- **+ 5 Minutes** extends the current deadline and rearms the warning. **I Know**, the close button, and warning timeout dismiss the banner without changing the schedule.
-- Pause and sleep preserve remaining work and reminder time. Manual pause survives sleep. Sleeping during a break ends that break and starts a fresh work session on wake.
+A changed `BreakConfiguration` starts a fresh work/reminder session, clears a pending skip, and preserves pause/sleep intent. Active breaks keep a settings snapshot and their existing countdown. Other settings do not reset work time. Saving dismisses obsolete warnings/reminders so they cannot retain old actions. Start-paused applies only on the next launch. Session progress is not persisted.
 
-## Architecture
+Skip suppresses exactly one scheduled break. Postpone adds the configured duration to the existing deadline and rearms the warning. Dismissing a warning does not move the deadline. Manual breaks override pending skips. Early-finish policy is checked in the controller as well as the button; disabling it does not prevent automatic completion or quitting the app.
+
+`ActiveHoursGate` pauses work/reminders outside the selected hours, resumes only pauses it owns, and never interrupts a running break. Manual pauses remain manual; **Keep Paused** cancels the gate's automatic resume. Manual breaks remain available outside working hours. An overnight interval belongs to its starting day; equal start/end covers the entire selected day. An empty weekday list deliberately keeps automatic activity paused. Calendar time determines eligibility while monotonic time still measures durations. The heartbeat remains active during scheduled pauses and stops during system sleep.
+
+Break/warning and reminder display selections are independent. Primary means the first `NSScreen.screens` entry, not `NSScreen.main` (which follows keyboard focus). Pointer selection is captured at presentation start, with primary fallback if that display is unavailable. Display refresh never restarts a break. Banners use each display's global visible frame and support top, center, or bottom placement.
+
+Compact and full-screen reminders share countdown/completion logic and pass mouse input through. Simultaneous reminders share one presentation; a warning/reminder collision emits at most one sound. Overlays use white text on a dark background; the appearance picker controls the Settings window. System Reduce Motion and Reduce Transparency override decorative effects. This is a reminder app, not a keyboard lock.
+
+## Code map
 
 | File | Responsibility |
 | --- | --- |
-| [`AppSettings.swift`](../LookAway/AppSettings.swift) | Preference defaults, bounds, decoding, persistence, and conversion to scheduler units |
-| [`SettingsEditor.swift`](../LookAway/SettingsEditor.swift) | Draft editing, restore defaults, and save/error handling |
-| [`SettingsView.swift`](../LookAway/SettingsView.swift), [`SettingsWindowController.swift`](../LookAway/SettingsWindowController.swift) | Native settings form and reusable window lifecycle |
-| [`BreakSchedule.swift`](../LookAway/BreakSchedule.swift) | Clock-driven state machine, reconfiguration, pause, skip, postpone, and sleep transitions |
-| [`AppDelegate.swift`](../LookAway/AppDelegate.swift) | Menu bar, heartbeat, system notifications, settings application, and UI coordination |
-| [`OverlayController.swift`](../LookAway/OverlayController.swift) | Shared countdown, display windows, and exactly-once completion |
-| [`PopupBannerController.swift`](../LookAway/PopupBannerController.swift) | Monitor-relative warning placement, one-shot actions, and cancellation |
-| [`OverlayWindow.swift`](../LookAway/OverlayWindow.swift) | Non-activating AppKit panel configuration |
-| [`OverlayView.swift`](../LookAway/OverlayView.swift), [`PopupBannerView.swift`](../LookAway/PopupBannerView.swift) | SwiftUI presentation and accessibility labels |
-| [`LookAwayTests/`](../LookAwayTests/) | Scheduling, settings, persistence, and presentation regression tests |
-
-Monotonic deadlines avoid timer drift and dependence on wall-clock changes. Presentation identifiers prevent stale buttons or delayed dismissals from affecting a newer overlay. Countdown and completion are shared across displays; display changes rebuild overlays without restarting the countdown and dismiss warning banners.
-
-Reminder panels do not explicitly activate LookAway. Opening Settings does activate it so the form can receive keyboard input. Brief reminders pass through mouse input; break overlays receive it. This is a reminder app, not a keyboard lock or security boundary. Full-screen, Spaces, focus, and accessibility behavior still require [manual testing](testing.md).
+| `AppSettings.swift` | Defaults, presets, validation, migration, and persistence |
+| `SettingsEditor.swift` | Draft editing and save/error handling |
+| `SettingsView.swift`, `SettingsWindowController.swift` | Tabbed settings and reusable window |
+| `LoginItemController.swift` | System-owned login registration and approval/errors |
+| `ActiveHours.swift` | Local-calendar eligibility, pause ownership, countdown formatting |
+| `BreakSchedule.swift` | Monotonic scheduling, reconfiguration, pause/skip/postpone/sleep |
+| `AppDelegate.swift` | Menu, heartbeat, notifications, settings and sound coordination |
+| `PresentationSupport.swift` | Display selection and per-event system sound playback |
+| `OverlayController.swift`, `OverlayView.swift` | Shared countdown, presentation snapshots, early finish, preview content |
+| `PopupBannerController.swift`, `PopupBannerView.swift` | Warning placement, one-shot actions, cancellation |
+| `OverlayWindow.swift` | Non-activating AppKit panels |
 
 ## Tests and contributions
-
-Choose **Product > Test** in Xcode, or run:
 
 ```sh
 xcodebuild test \
@@ -100,22 +101,12 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
 ```
 
-The shared scheme runs `LookAwayTests`, not the generated `LookAwayUITests` starter target. Tests inject clocks and display providers rather than waiting through work sessions. Preference tests use isolated, uniquely named defaults suites and remove only those suites after each test. Window tests exercise construction and close/reopen behavior; they are not end-to-end keyboard or VoiceOver tests.
+The shared scheme runs `LookAwayTests`, not the generated UI-test starter target. Tests inject time, calendar/display inputs, and login-service closures. Preferences use isolated defaults suites. Automated tests never register the runner as a login item or require audible playback. Window tests cover construction and reuse, not end-to-end keyboard, VoiceOver, or screen rendering.
 
-[GitHub Actions](https://github.com/longnt27/lookaway/actions/workflows/ci.yml) runs regression tests with coverage and a universal Release build on pushes and pull requests. The `macos-test-results` artifact retains results and logs for seven days. Coverage is enabled explicitly for CI tests, not ordinary Release builds.
+[CI](https://github.com/longnt27/lookaway/actions/workflows/ci.yml) runs regression tests with coverage, a universal Release build, and architecture verification. Results/logs are retained for seven days as `macos-test-results`. Release builds have no coverage instrumentation. Add regression tests for behavior changes and record desktop checks separately in [testing.md](testing.md). Do not commit build products or Xcode user state.
 
-Keep changes focused, add regression tests for timing or lifecycle fixes, and run the macOS suite before submitting a pull request. Record manual checks separately using the [testing checklist](testing.md). Do not commit build products, `DerivedData`, or Xcode user state. Quit any running copy before replacing the installed app.
+## Troubleshooting and scope
 
-## Build troubleshooting
+For signing errors, select your own local signing identity/team. For missing SDKs, install full Xcode and select it under **Settings > Locations > Command Line Tools**. Report display/focus issues with macOS version, display layout/scaling, and reproduction steps. For login-item problems, install the signed app in Applications and inspect the status/error and macOS Login Items settings.
 
-**Signing errors:** Select your own local signing configuration or team. The unsigned commands above are suitable for build/test verification.
-
-**Missing Xcode or macOS SDK:** Install the full Xcode application, open it to finish setup, and select it under **Xcode > Settings > Locations > Command Line Tools**.
-
-**Display or focus issues:** Include your macOS version, display layout/scaling, and reproduction steps in an [issue](https://github.com/longnt27/lookaway/issues). Note whether the problem occurs when a panel appears, is clicked, or disappears.
-
-## Current scope
-
-There is no built-in launch-at-login setting, idle or meeting detection, saved session history, or automatic updater. Reminder functionality does not use network access or require camera, microphone, Accessibility, or Screen Recording permissions. LookAway is not a medical device or a substitute for professional care.
-
-The repository does not currently declare a license in a `LICENSE` file.
+There is no idle/meeting detection, session history, or automatic updater. Reminder functionality needs no network service, camera, microphone, Accessibility, or Screen Recording permission. LookAway is not a medical device. The repository does not currently declare a license in a `LICENSE` file.

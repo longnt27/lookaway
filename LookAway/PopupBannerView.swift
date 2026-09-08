@@ -5,6 +5,7 @@ struct PopupBannerView: View {
     let onKnow: () -> Void
     let onSkipBreak: () -> Void
     let onAddFiveMinutes: () -> Void
+    var settings: AppSettings = .defaults
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPresented = false
 
@@ -12,54 +13,48 @@ struct PopupBannerView: View {
         VStack(spacing: 12) {
             HStack {
                 Spacer()
-                Button(action: onKnow) {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss break warning")
+                Button(action: onKnow) { Image(systemName: "xmark") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss break warning")
             }
             HStack(spacing: 12) {
-                Image(systemName: "timer")
-                    .font(.system(size: 24, weight: .medium))
+                Image(systemName: "timer").font(.system(size: 24, weight: .medium))
                 Text(message)
                     .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
             }
             Spacer(minLength: 4)
             HStack(spacing: 10) {
-                Button("I Know", action: onKnow)
-                    .buttonStyle(BannerButtonStyle())
-                Button("Skip Break", action: onSkipBreak)
-                    .buttonStyle(BannerButtonStyle())
-                    .accessibilityIdentifier("skipUpcomingBreak")
+                Button("I Know", action: onKnow).buttonStyle(BannerButtonStyle())
+                if settings.allowSkip {
+                    Button("Skip Break", action: onSkipBreak)
+                        .buttonStyle(BannerButtonStyle())
+                        .accessibilityIdentifier("skipUpcomingBreak")
+                }
                 Button(action: onAddFiveMinutes) {
-                    Label("5 Minutes", systemImage: "plus.circle.fill")
+                    Label("\(settings.snoozeMinutes) min", systemImage: "plus.circle.fill")
                 }
                 .buttonStyle(BannerButtonStyle(isPrimary: true))
-                .accessibilityLabel("Postpone break by five minutes")
+                .accessibilityLabel("Postpone break by \(settings.snoozeMinutes) minutes")
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(.white)
-        .background {
-            VisualEffectBlur()
-                .overlay(Color.black.opacity(0.25))
-        }
+        .background { OverlayBackground(settings: settings) }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .opacity(isPresented ? 1 : 0)
         .onAppear {
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+            withAnimation(reduceMotion || !settings.animationsEnabled ? nil : .easeOut(duration: 0.2)) {
                 isPresented = true
             }
         }
-        // The controller owns the sole timeout. Actions run immediately rather
-        // than racing an independent view timer or a delayed exit animation.
     }
 }
 
 private struct BannerButtonStyle: ButtonStyle {
     var isPrimary = false
-
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))

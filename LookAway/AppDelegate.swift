@@ -9,11 +9,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let overlayController = OverlayController()
     private let popupBanner = PopupBannerController()
     private let settingsStore = SettingsStore()
+    private let soundPlayer = SoundPlayer()
     private var settingsWindowController: SettingsWindowController?
     private var heartbeat: DispatchSourceTimer?
     private var schedule = BreakSchedule(now: ProcessInfo.processInfo.systemUptime)
+    private var activeHours = ActiveHoursGate()
 
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
+    private var allowedNow: Bool { settingsStore.value.isActive(at: Date()) }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBar()
@@ -23,22 +26,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         workspace.addObserver(self, selector: #selector(systemDidWake(_:)),
                               name: NSWorkspace.didWakeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged(_:)),
-                                               name: NSApplication.didChangeScreenParametersNotification,
-                                               object: nil)
+                                               name: NSApplication.didChangeScreenParametersNotification, object: nil)
         schedule = BreakSchedule(configuration: settingsStore.value.breakConfiguration, now: now)
+        if settingsStore.value.startPaused { schedule.pause(at: now) }
         startHeartbeat()
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        tearDown()
-    }
+    func applicationWillTerminate(_ notification: Notification) { tearDown() }
 
     private func setupStatusBar() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         item.button?.imagePosition = .imageLeading
         statusItem = item
-
         let menu = NSMenu()
         menu.autoenablesItems = false
         let start = NSMenuItem(title: "Start Break Now", action: #selector(forceShowBreak), keyEquivalent: "s")
@@ -62,7 +62,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showSettings() {
-        // A screen-covering break would obscure the settings window.
         guard schedule.phase != .onBreak, !schedule.isSleeping else { return }
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
@@ -75,22 +74,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applySettings(_ value: AppSettings) throws {
         guard try settingsStore.save(value) else { return }
         let configuration = settingsStore.value.breakConfiguration
-        if configuration != schedule.configuration {
-            schedule.updateConfiguration(configuration, at: now)
-            popupBanner.hide()
-            // Never dismiss or restart a break already in progress.
-            if schedule.phase != .onBreak { overlayController.hide(cleanupOnly: true) }
-            startHeartbeat()
-        } else {
-            // Display-only changes preserve elapsed time and a pending skip/warning.
-            updateStatusBar()
-        }
+        if configuration != schedule.configuration { schedule.updateConfiguration(configuration, at: now) }
+        // A visible banner must not retain obsolete skip/snooze actions after saving.
+        popupBanner.hide()
+        if schedule.phase != .onBreak { overlayController.hide(cleanupOnly: true) }
+        // Active breaks retain a presentation snapshot. Non-timing changes preserve the schedule.
+        startHeartbeat()
     }
 
     private func startHeartbeat() {
         stopHeartbeat()
         tick()
-        guard schedule.phase == .working, !schedule.isSleeping else { return }
+        guard !schedule.isSleeping, schedule.phase != .onBreak,
+              schedule.phase == .working || settingsStore.value.activeHoursEnabled else { return }
         let source = DispatchSource.makeTimerSource(queue: .main)
         source.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(50))
         source.setEventHandler { [weak self] in
@@ -106,6 +102,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func tick() {
+        let wasWorking = schedule.phase == .working
+        activeHours.reconcile(allowed: allowedNow, schedule: &schedule, at: now)
+        guard schedule.phase == .working, !schedule.isSleeping else {
+            if wasWorking {
+                popupBanner.hide()
+                overlayController.hide(cleanupOnly: true)
+            }
+            updateStatusBar()
+            return
+        }
         let events = schedule.advance(at: now)
         if events.contains(.startBreak) {
             presentBreak()
@@ -113,88 +119,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if events.contains(.skippedBreak) { popupBanner.hide() }
         if events.contains(.warning) { showWarningPopup() }
-
+        let settings = settingsStore.value
         var reminders: [String] = []
-        if events.contains(.blinkReminder) { reminders.append("Blink your eyes") }
-        if events.contains(.postureReminder) { reminders.append("Adjust your posture") }
+        if events.contains(.blinkReminder) { reminders.append(settings.blinkMessage) }
+        if events.contains(.postureReminder) { reminders.append(settings.postureMessage) }
         if !reminders.isEmpty {
-            // Reminders due together share a presentation instead of replacing one another.
             overlayController.show(mode: .reminder(message: reminders.joined(separator: "\n"),
-                                                   duration: schedule.configuration.reminderSeconds))
+                                                   duration: schedule.configuration.reminderSeconds), settings: settings)
+            // A simultaneous warning/reminder gets one sound, not overlapping sounds.
+            if !events.contains(.warning) { soundPlayer.play(event: .reminder, settings: settings) }
         }
         updateStatusBar()
     }
 
     private func showWarningPopup() {
+        let settings = settingsStore.value
         popupBanner.show(
             message: "Break starts in \(schedule.remainingSeconds(at: now)) seconds.",
             onKnow: {},
             onSkipBreak: { [weak self] in
-                guard let self = self else { return }
+                guard let self = self, self.settingsStore.value.allowSkip else { return }
                 self.schedule.skipUpcomingBreak()
                 self.tick()
             },
             onAddFiveMinutes: { [weak self] in
                 guard let self = self else { return }
-                self.schedule.postponeBreak(at: self.now)
+                self.schedule.postponeBreak(by: self.settingsStore.value.snoozeMinutes * 60, at: self.now)
                 self.tick()
-            }
+            }, settings: settings
         )
+        soundPlayer.play(event: .warning, settings: settings)
     }
 
     private func presentBreak() {
         stopHeartbeat()
         popupBanner.hide()
+        let settings = settingsStore.value
         overlayController.show(
-            mode: .breakSession(seconds: schedule.configuration.breakSeconds),
+            mode: .breakSession(seconds: schedule.configuration.breakSeconds), settings: settings,
             onHide: { [weak self] in
                 guard let self = self, self.schedule.phase == .onBreak else { return }
                 self.schedule.finishBreak(at: self.now)
+                self.soundPlayer.play(event: .breakEnd, settings: self.settingsStore.value)
                 self.startHeartbeat()
-            },
-            onTick: { [weak self] _ in self?.updateStatusBar() }
+            }, onTick: { [weak self] _ in self?.updateStatusBar() }
         )
+        soundPlayer.play(event: .breakStart, settings: settings)
         updateStatusBar()
     }
 
     @objc private func forceShowBreak() {
         guard schedule.startBreakNow() else { return }
+        activeHours.cancelAutomaticResume()
         presentBreak()
     }
 
     @objc private func toggleMainTimer() {
+        guard !schedule.isSleeping else { return }
         switch schedule.phase {
-        case .onBreak:
-            return
+        case .onBreak: return
         case .working:
             schedule.pause(at: now)
-            stopHeartbeat()
+            activeHours.cancelAutomaticResume()
             popupBanner.hide()
             overlayController.hide(cleanupOnly: true)
         case .paused:
-            schedule.resume(at: now)
-            startHeartbeat()
+            if activeHours.ownsPause {
+                // "Keep Paused" turns an automatic pause into a manual pause.
+                activeHours.cancelAutomaticResume()
+            } else if allowedNow {
+                schedule.resume(at: now)
+            }
         }
-        updateStatusBar()
+        startHeartbeat()
     }
 
     private func updateStatusBar() {
+        let settings = settingsStore.value
         let text: String
         let icon: String
+        let time = CountdownText.format(schedule.remainingSeconds(at: now), showsSeconds: settings.showCountdownSeconds)
         switch schedule.phase {
         case .working:
-            text = formatTime(schedule.remainingSeconds(at: now))
+            text = time
             icon = schedule.skipsUpcomingBreak ? "forward.end" : "timer"
         case .paused:
-            text = "Paused " + formatTime(schedule.remainingSeconds(at: now))
-            icon = "pause.circle.fill"
+            text = activeHours.ownsPause ? "Outside hours" : "Paused " + time
+            icon = activeHours.ownsPause ? "calendar" : "pause.circle.fill"
         case .onBreak:
-            text = "Break " + formatTime(overlayController.remainingSeconds)
+            text = "Break " + CountdownText.format(overlayController.remainingSeconds, showsSeconds: settings.showCountdownSeconds)
             icon = "cup.and.saucer.fill"
         }
         if let button = statusItem?.button {
-            button.title = settingsStore.value.showCountdown ? " " + text : ""
-            button.imagePosition = settingsStore.value.showCountdown ? .imageLeading : .imageOnly
+            button.title = settings.showCountdown ? " " + text : ""
+            button.imagePosition = settings.showCountdown ? .imageLeading : .imageOnly
             button.setAccessibilityLabel("LookAway: " + text)
             let image = NSImage(systemSymbolName: icon, accessibilityDescription: text)
             image?.isTemplate = true
@@ -203,15 +221,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ? "LookAway: " + text + ". The next scheduled break will be skipped."
                 : "LookAway: " + text
         }
-        pauseItem?.title = schedule.phase == .paused ? "Resume Timer" : "Pause Timer"
+        pauseItem?.title = activeHours.ownsPause ? "Keep Paused" : (schedule.phase == .paused ? "Resume Timer" : "Pause Timer")
         pauseItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
+            && (schedule.phase == .working || activeHours.ownsPause || allowedNow)
         breakItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
         settingsItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
-    }
-
-    private func formatTime(_ seconds: Int) -> String {
-        let value = max(0, seconds)
-        return String(format: "%02d:%02d", value / 60, value % 60)
     }
 
     @objc private func systemWillSleep(_ notification: Notification) {
@@ -219,6 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopHeartbeat()
         popupBanner.hide()
         overlayController.hide(cleanupOnly: true)
+        soundPlayer.stop()
         updateStatusBar()
     }
 
@@ -229,7 +244,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func screensChanged(_ notification: Notification) {
         overlayController.refreshScreens()
-        // A warning on a disconnected display must not leave an invisible action alive.
         popupBanner.hide()
     }
 
@@ -244,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.removeObserver(self)
         popupBanner.hide()
         overlayController.hide(cleanupOnly: true)
+        soundPlayer.stop()
         settingsWindowController?.close()
     }
 }

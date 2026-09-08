@@ -7,15 +7,22 @@ final class OverlayViewModel: ObservableObject {
     @Published var shouldDismiss = false
     let duration: Int
     let message: String
+    let settings: AppSettings
 
-    init(duration: Int, message: String = "") {
+    init(duration: Int, message: String = "", settings: AppSettings = .defaults) {
         self.duration = max(0, duration)
         self.remaining = max(0, duration)
         self.message = message
+        self.settings = settings.normalized
     }
 
     var readyDelayRemaining: Int {
-        max(0, 3 - (duration - remaining))
+        let delay = min(settings.readyDelay, max(0, duration - 1))
+        return max(0, delay - (duration - remaining))
+    }
+
+    var canFinishEarly: Bool {
+        settings.allowEarlyFinish && readyDelayRemaining == 0 && !shouldDismiss
     }
 }
 
@@ -43,16 +50,21 @@ final class OverlayController {
     private var onTickCallback: ((Int) -> Void)?
     private let clock: () -> TimeInterval
     private let screens: () -> [NSScreen]
+    private let pointer: () -> NSPoint
     private let dismissalDuration: TimeInterval
+    private var presentationPointer = NSPoint.zero
+    private var animated = true
 
     private(set) var presentationID: UUID?
     private(set) var currentMode: OverlayMode?
 
     init(clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          screens: @escaping () -> [NSScreen] = { NSScreen.screens },
-         dismissalDuration: TimeInterval = 0.5) {
+         dismissalDuration: TimeInterval = 0.5,
+         pointer: @escaping () -> NSPoint = { NSEvent.mouseLocation }) {
         self.clock = clock
         self.screens = screens
+        self.pointer = pointer
         self.dismissalDuration = max(0, dismissalDuration)
     }
 
@@ -63,21 +75,23 @@ final class OverlayController {
 
     var remainingSeconds: Int { viewModel?.remaining ?? 0 }
 
-    func show(mode: OverlayMode,
+    func show(mode: OverlayMode, settings: AppSettings = .defaults,
               onHide: (() -> Void)? = nil,
               onTick: ((Int) -> Void)? = nil) {
-        // Neither a reminder nor a repeated manual action may replace a break.
         guard !isShowingBreak else { return }
         hide(cleanupOnly: true)
-
         let id = UUID()
         presentationID = id
         currentMode = mode
         onHideCallback = onHide
         onTickCallback = onTick
+        presentationPointer = pointer()
+        var snapshot = settings.normalized
+        snapshot.animationsEnabled = snapshot.animationsEnabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        animated = snapshot.animationsEnabled
         let message: String
         if case .reminder(let text, _) = mode { message = text } else { message = "" }
-        viewModel = OverlayViewModel(duration: mode.duration, message: message)
+        viewModel = OverlayViewModel(duration: mode.duration, message: message, settings: snapshot)
         deadline = clock() + TimeInterval(max(0, mode.duration))
         if mode.duration > 0 { createWindows() }
         tick()
@@ -100,12 +114,17 @@ final class OverlayController {
         if model.remaining == 0 { dismiss(presentationID: id) }
     }
 
-    /// Old buttons and cancelled animation callbacks cannot close a newer overlay.
+    /// Enforce the early-finish preference in the controller as well as the visible button.
+    func finishEarly(presentationID id: UUID) {
+        guard presentationID == id, isShowingBreak, viewModel?.canFinishEarly == true else { return }
+        dismiss(presentationID: id)
+    }
+
     func dismiss(presentationID id: UUID) {
         guard presentationID == id, let model = viewModel, !model.shouldDismiss else { return }
         stopTimer()
         model.shouldDismiss = true
-        guard !windows.isEmpty, dismissalDuration > 0 else {
+        guard !windows.isEmpty, animated, dismissalDuration > 0 else {
             hide()
             return
         }
@@ -130,7 +149,6 @@ final class OverlayController {
         dismissWorkItem?.cancel()
         dismissWorkItem = nil
         let completion = onHideCallback
-        // Clear everything before calling client code, which may show another overlay.
         presentationID = nil
         currentMode = nil
         deadline = nil
@@ -143,20 +161,26 @@ final class OverlayController {
 
     private func createWindows() {
         guard let model = viewModel, let mode = currentMode, let id = presentationID else { return }
-        for screen in screens() {
+        let settings = model.settings
+        let selection = isShowingBreak ? settings.breakDisplays : settings.reminderDisplays
+        for screen in DisplaySelector.select(selection, from: screens(), pointer: presentationPointer) {
+            let compact = !isShowingBreak && settings.reminderStyle == .banner
+            let frame = compact
+                ? BannerLayout.frame(in: screen.visibleFrame, position: settings.bannerPosition)
+                : screen.frame
             let view = OverlayView(viewModel: model, mode: mode, onDone: { [weak self] in
-                self?.dismiss(presentationID: id)
+                self?.finishEarly(presentationID: id)
             })
-            let window = OverlayWindow(contentRect: screen.frame,
+            let window = OverlayWindow(contentRect: frame,
                                        styleMask: [.borderless, .nonactivatingPanel],
                                        backing: .buffered, defer: false)
             window.configureForOverlay()
-            window.level = .screenSaver
-            window.hasShadow = false
+            window.level = compact ? .floating : .screenSaver
+            window.hasShadow = compact
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             if case .reminder = mode { window.ignoresMouseEvents = true }
             window.contentViewController = NSHostingController(rootView: view)
-            window.setFrame(screen.frame, display: true)
+            window.setFrame(frame, display: true)
             window.orderFrontRegardless()
             windows.append(window)
         }
