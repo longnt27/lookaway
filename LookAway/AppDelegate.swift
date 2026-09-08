@@ -1,217 +1,209 @@
-// AppDelegate.swift
-
 import AppKit
 
-class AppDelegate: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem!
-    let overlayController = OverlayController()
-    let popupBanner = PopupBannerController()
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem?
+    private var pauseItem: NSMenuItem?
+    private var breakItem: NSMenuItem?
+    private let overlayController = OverlayController()
+    private let popupBanner = PopupBannerController()
+    private var heartbeat: DispatchSourceTimer?
+    private var schedule = BreakSchedule(now: ProcessInfo.processInfo.systemUptime)
 
-    private var mainTimer: DispatchSourceTimer?
-    private var remainingSeconds: Int = 0
-    private var isInBreak: Bool = false
-
-    private var blinkTimer: DispatchSourceTimer?
-    private var postureTimer: DispatchSourceTimer?
-
-    // Configurable times in minutes/seconds
-    let intervalMinutes = 30
-    let breakSeconds = 30
-    let blinkIntervalMinutes = 5
-    let postureIntervalMinutes = 10
-    let warningBeforeEndSeconds = 60 // 1 phút trước break
-
-    private var skipNextBreak = false
+    private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBar()
-        startMainTimer(reset: true)
-        startReminderTimers()
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(self, selector: #selector(systemWillSleep(_:)),
+                              name: NSWorkspace.willSleepNotification, object: nil)
+        workspace.addObserver(self, selector: #selector(systemDidWake(_:)),
+                              name: NSWorkspace.didWakeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(screensChanged(_:)),
+                                               name: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil)
+        schedule = BreakSchedule(now: now)
+        startHeartbeat()
     }
 
-    func setupStatusBar() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            // FIX: Không chỉ set font mà còn set image position
-            button.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-            button.imagePosition = .imageLeading // Đảm bảo icon luôn ở bên trái
-        }
+    func applicationWillTerminate(_ notification: Notification) {
+        tearDown()
+    }
+
+    private func setupStatusBar() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        item.button?.imagePosition = .imageLeading
+        statusItem = item
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Start Break Now", action: #selector(forceShowBreak), keyEquivalent: "s"))
-        menu.addItem(NSMenuItem(title: "Pause/Resume Timer", action: #selector(toggleMainTimer), keyEquivalent: "p"))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
-        statusItem.menu = menu
+        menu.autoenablesItems = false
+        let start = NSMenuItem(title: "Start Break Now", action: #selector(forceShowBreak), keyEquivalent: "s")
+        start.target = self
+        menu.addItem(start)
+        breakItem = start
+        let pause = NSMenuItem(title: "Pause Timer", action: #selector(toggleMainTimer), keyEquivalent: "p")
+        pause.target = self
+        menu.addItem(pause)
+        pauseItem = pause
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "Quit LookAway", action: #selector(quitApp), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
+        item.menu = menu
     }
-    
-    // ADD: Hàm helper để cập nhật cả icon và text trên status bar
-    func updateStatusBar(text: String, iconName: String?) {
-        guard let button = statusItem.button else { return }
-        
-        // Luôn cập nhật text
-        // Thêm một khoảng trắng nhỏ để text không dính vào icon
-        button.title = " " + text
-        
-        if let iconName = iconName {
-            let image = NSImage(systemSymbolName: iconName, accessibilityDescription: text)
-            // isTemplate rất quan trọng để icon tự động đổi màu theo Light/Dark mode
-            image?.isTemplate = true
-            button.image = image
-        } else {
-            // Nếu không có icon name, xoá icon đi
-            button.image = nil
+
+    private func startHeartbeat() {
+        stopHeartbeat()
+        tick()
+        guard schedule.phase == .working, !schedule.isSleeping else { return }
+        let source = DispatchSource.makeTimerSource(queue: .main)
+        source.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(50))
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.tick() }
         }
+        heartbeat = source
+        source.resume()
     }
 
-    func startMainTimer(reset: Bool = true) {
-        stopMainTimer()
-        if reset {
-            remainingSeconds = intervalMinutes * 60 + 2
-        }
-        isInBreak = false
-        updateMenuTitle()
-
-        mainTimer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
-        mainTimer?.schedule(deadline: .now() + 1, repeating: 1)
-        mainTimer?.setEventHandler { [weak self] in
-            guard let self = self else { return }
-            self.remainingSeconds -= 1
-
-            if self.remainingSeconds == self.warningBeforeEndSeconds && !self.isInBreak {
-                DispatchQueue.main.async {
-                    self.showWarningPopup()
-                }
-            }
-
-            if self.remainingSeconds <= 0 {
-                self.triggerBreak()
-            }
-            self.updateMenuTitle()
-        }
-        mainTimer?.resume()
+    private func stopHeartbeat() {
+        heartbeat?.cancel()
+        heartbeat = nil
     }
 
-    func stopMainTimer() {
-        mainTimer?.cancel()
-        mainTimer = nil
-    }
-
-    func startReminderTimers() {
-        // ... (Không có thay đổi trong hàm này)
-        stopReminderTimers()
-
-        let blinkIntervalSeconds = blinkIntervalMinutes * 60
-        blinkTimer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
-        blinkTimer?.schedule(deadline: .now() + .seconds(blinkIntervalSeconds), repeating: .seconds(blinkIntervalSeconds))
-        blinkTimer?.setEventHandler { [weak self] in
-            self?.showReminderOverlay(message: "Blink your eyes 👀", duration: 2)
-        }
-        blinkTimer?.resume()
-
-        let postureIntervalSeconds = postureIntervalMinutes * 60
-        postureTimer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
-        postureTimer?.schedule(deadline: .now() + .seconds(postureIntervalSeconds), repeating: .seconds(postureIntervalSeconds))
-        postureTimer?.setEventHandler { [weak self] in
-            self?.showReminderOverlay(message: "Adjust your posture 🪑", duration: 2)
-        }
-        postureTimer?.resume()
-    }
-
-    func stopReminderTimers() {
-        // ... (Không có thay đổi trong hàm này)
-        blinkTimer?.cancel()
-        blinkTimer = nil
-        postureTimer?.cancel()
-        postureTimer = nil
-    }
-
-    private func showReminderOverlay(message: String, duration: Int) {
-        // ... (Không có thay đổi trong hàm này)
-        overlayController.show(
-            mode: .reminder(message: message, duration: duration),
-            onHide: nil,
-            onTick: nil
-        )
-    }
-
-    func showWarningPopup() {
-        // ... (Không có thay đổi trong hàm này)
-        popupBanner.show(
-            message: "Break is coming in 1 minute.",
-            onKnow: {
-                // User saw warning, không làm gì thêm
-            },
-            onSkipBreak: {
-                self.skipNextBreak = true
-            },
-            onAddFiveMinutes: {
-                self.remainingSeconds += 5 * 60
-                self.updateMenuTitle()
-            }
-        )
-    }
-
-    func triggerBreak() {
-        stopMainTimer()
-        if skipNextBreak {
-            skipNextBreak = false
-            startMainTimer(reset: false)
+    private func tick() {
+        let events = schedule.advance(at: now)
+        if events.contains(.startBreak) {
+            presentBreak()
             return
         }
-        isInBreak = true
+        if events.contains(.skippedBreak) { popupBanner.hide() }
+        if events.contains(.warning) { showWarningPopup() }
 
-        overlayController.show(
-            mode: .breakSession(seconds: breakSeconds),
-            onHide: { [weak self] in
-                self?.startMainTimer(reset: true)
-                self?.isInBreak = false
+        var reminders: [String] = []
+        if events.contains(.blinkReminder) { reminders.append("Blink your eyes") }
+        if events.contains(.postureReminder) { reminders.append("Adjust your posture") }
+        if !reminders.isEmpty {
+            // Reminders due together share a presentation instead of replacing one another.
+            overlayController.show(mode: .reminder(message: reminders.joined(separator: "\n"),
+                                                   duration: schedule.configuration.reminderSeconds))
+        }
+        updateStatusBar()
+    }
+
+    private func showWarningPopup() {
+        popupBanner.show(
+            message: "Break starts in \(schedule.remainingSeconds(at: now)) seconds.",
+            onKnow: {},
+            onSkipBreak: { [weak self] in
+                guard let self = self else { return }
+                self.schedule.skipUpcomingBreak()
+                self.tick()
             },
-            onTick: { [weak self] remaining in
-                DispatchQueue.main.async {
-                    // FIX: Sử dụng hàm helper để cập nhật status bar với icon break
-                    let timeString = self?.formatTime(remaining) ?? ""
-                    self?.updateStatusBar(text: "Break " + timeString, iconName: "cup.and.saucer.fill")
-                }
+            onAddFiveMinutes: { [weak self] in
+                guard let self = self else { return }
+                self.schedule.postponeBreak(at: self.now)
+                self.tick()
             }
         )
     }
 
-    @objc func toggleMainTimer() {
-        if isInBreak { return }
-        if mainTimer == nil {
-            startMainTimer(reset: false)
-        } else {
-            stopMainTimer()
-            // FIX: Sử dụng hàm helper để cập nhật status bar với icon pause
-            updateStatusBar(text: "Paused " + formatTime(remainingSeconds), iconName: "pause.circle.fill")
+    private func presentBreak() {
+        stopHeartbeat()
+        popupBanner.hide()
+        overlayController.show(
+            mode: .breakSession(seconds: schedule.configuration.breakSeconds),
+            onHide: { [weak self] in
+                guard let self = self, self.schedule.phase == .onBreak else { return }
+                self.schedule.finishBreak(at: self.now)
+                self.startHeartbeat()
+            },
+            onTick: { [weak self] _ in self?.updateStatusBar() }
+        )
+        updateStatusBar()
+    }
+
+    @objc private func forceShowBreak() {
+        guard schedule.startBreakNow() else { return }
+        presentBreak()
+    }
+
+    @objc private func toggleMainTimer() {
+        switch schedule.phase {
+        case .onBreak:
+            return
+        case .working:
+            schedule.pause(at: now)
+            stopHeartbeat()
+            popupBanner.hide()
+            overlayController.hide(cleanupOnly: true)
+        case .paused:
+            schedule.resume(at: now)
+            startHeartbeat()
         }
+        updateStatusBar()
     }
 
-    func updateMenuTitle() {
-        DispatchQueue.main.async {
-            if !self.isInBreak {
-                // FIX: Sử dụng hàm helper để cập nhật status bar với icon timer
-                self.updateStatusBar(text: self.formatTime(self.remainingSeconds), iconName: "timer")
-            }
+    private func updateStatusBar() {
+        let text: String
+        let icon: String
+        switch schedule.phase {
+        case .working:
+            text = formatTime(schedule.remainingSeconds(at: now))
+            icon = schedule.skipsUpcomingBreak ? "forward.end" : "timer"
+        case .paused:
+            text = "Paused " + formatTime(schedule.remainingSeconds(at: now))
+            icon = "pause.circle.fill"
+        case .onBreak:
+            text = "Break " + formatTime(overlayController.remainingSeconds)
+            icon = "cup.and.saucer.fill"
         }
+        if let button = statusItem?.button {
+            button.title = " " + text
+            let image = NSImage(systemSymbolName: icon, accessibilityDescription: text)
+            image?.isTemplate = true
+            button.image = image
+            button.toolTip = schedule.skipsUpcomingBreak ? "The next scheduled break will be skipped." : "LookAway: " + text
+        }
+        pauseItem?.title = schedule.phase == .paused ? "Resume Timer" : "Pause Timer"
+        pauseItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
+        breakItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
     }
 
-    func formatTime(_ totalSeconds: Int) -> String {
-        // ... (Không có thay đổi trong hàm này)
-        let s = max(0, totalSeconds)
-        return String(format: "%02d:%02d", s / 60, s % 60)
+    private func formatTime(_ seconds: Int) -> String {
+        let value = max(0, seconds)
+        return String(format: "%02d:%02d", value / 60, value % 60)
     }
 
-    @objc func forceShowBreak() {
-        triggerBreak()
-    }
-
-    @objc func quitApp() {
-        // ... (Không có thay đổi trong hàm này)
-        stopMainTimer()
-        stopReminderTimers()
+    @objc private func systemWillSleep(_ notification: Notification) {
+        schedule.prepareForSleep(at: now)
+        stopHeartbeat()
+        popupBanner.hide()
         overlayController.hide(cleanupOnly: true)
+        updateStatusBar()
+    }
+
+    @objc private func systemDidWake(_ notification: Notification) {
+        schedule.wake(at: now)
+        startHeartbeat()
+    }
+
+    @objc private func screensChanged(_ notification: Notification) {
+        overlayController.refreshScreens()
+        // A warning on a disconnected display must not leave an invisible action alive.
+        popupBanner.hide()
+    }
+
+    @objc private func quitApp() {
+        tearDown()
         NSApplication.shared.terminate(nil)
+    }
+
+    private func tearDown() {
+        stopHeartbeat()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
+        popupBanner.hide()
+        overlayController.hide(cleanupOnly: true)
     }
 }
