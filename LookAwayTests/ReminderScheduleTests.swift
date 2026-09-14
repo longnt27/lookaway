@@ -61,10 +61,11 @@ final class ReminderScheduleTests: XCTestCase {
 
     func testChangingOneIntervalRestartsOnlyThatReminder() {
         var schedule = BreakSchedule(configuration: configuration(reminders: [(a, 300), (b, 600)]), now: 0)
-        schedule.updateConfiguration(configuration(reminders: [(a, 120), (b, 600)]), at: 100)
-        XCTAssertEqual(schedule.advance(at: 219), [])
-        XCTAssertEqual(schedule.advance(at: 220), [.reminder(a)])
+        schedule.updateConfiguration(configuration(reminders: [(a, 700), (b, 600)]), at: 100)
+        XCTAssertEqual(schedule.advance(at: 599), [])
         XCTAssertEqual(schedule.advance(at: 600), [.reminder(b)])
+        XCTAssertEqual(schedule.advance(at: 799), [])
+        XCTAssertEqual(schedule.advance(at: 800), [.reminder(a)])
     }
 
     func testReminderOnlyChangesDoNotResetPendingSkipOrWorkRemaining() {
@@ -82,7 +83,7 @@ final class ReminderScheduleTests: XCTestCase {
         schedule.resume(at: 1000)
         XCTAssertEqual(schedule.advance(at: 1199), [])
         XCTAssertEqual(schedule.advance(at: 1200), [.reminder(a)])
-        XCTAssertEqual(schedule.advance(at: 1500), [.reminder(b), .reminder(a)])
+        XCTAssertEqual(schedule.advance(at: 1500), [.reminder(a), .reminder(b)])
     }
 
     func testSleepWakePreservesReminderTimeWithoutBacklog() {
@@ -95,7 +96,7 @@ final class ReminderScheduleTests: XCTestCase {
     }
 
     func testFinishingBreakStartsFreshCyclesForAllEnabledReminders() {
-        var schedule = BreakSchedule(configuration: configuration(work: 100, reminders: [(a, 30), (b, 50)]), now: 0)
+        var schedule = BreakSchedule(configuration: configuration(work: 100, warning: 0, reminders: [(a, 30), (b, 50)]), now: 0)
         XCTAssertEqual(schedule.advance(at: 100), [.startBreak])
         schedule.finishBreak(at: 120)
         XCTAssertEqual(schedule.advance(at: 149), [])
