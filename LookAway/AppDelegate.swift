@@ -162,8 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applySettings(_ value: AppSettings) throws {
         guard try settingsStore.save(value) else { return }
-        let configuration = settingsStore.value.breakConfiguration
-        if configuration != schedule.configuration { schedule.updateConfiguration(configuration, at: now) }
+        schedule.updateConfiguration(settingsStore.value.breakConfiguration, at: now)
         popupBanner.hide()
         if schedule.phase != .onBreak { overlayController.hide(cleanupOnly: true) }
         startHeartbeat()
@@ -207,12 +206,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if events.contains(.skippedBreak) { popupBanner.hide() }
         if events.contains(.warning) { showWarningPopup() }
         let settings = settingsStore.value
-        var reminders: [String] = []
-        if events.contains(.blinkReminder) { reminders.append(settings.blinkMessage) }
-        if events.contains(.postureReminder) { reminders.append(settings.postureMessage) }
-        if !reminders.isEmpty {
-            overlayController.show(mode: .reminder(message: reminders.joined(separator: "\n"),
-                                                   duration: schedule.configuration.reminderSeconds), settings: settings)
+        if let message = ReminderPresentationResolver.message(for: events, settings: settings) {
+            overlayController.show(
+                mode: .reminder(message: message, duration: settings.reminderSeconds),
+                settings: settings
+            )
         }
         if let event = SoundEvent.selected(for: events, settings: settings) {
             soundPlayer.play(event: event, settings: settings)
