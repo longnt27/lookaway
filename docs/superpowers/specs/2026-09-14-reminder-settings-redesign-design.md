@@ -104,6 +104,8 @@ Sections:
 
 Reminder presentation remains global. Individual reminders do not choose their own style, display, duration, position, or animation behavior.
 
+`Banner position` remains the existing shared setting used by compact reminder banners and advance-warning banners. Moving the control into Appearance is an information-architecture change only; this redesign does not split it into separate warning/reminder positions.
+
 ### Sounds
 
 Keep sound behavior global rather than adding per-reminder sound configuration.
@@ -184,11 +186,13 @@ Normalization must:
 
 - Clamp each reminder interval to the allowed reminder interval range.
 - Trim/collapse whitespace in names and messages.
-- Enforce the same message length limit used today unless there is a strong implementation reason to change it.
+- Enforce the existing message length limit.
 - Preserve reminder order.
 - Preserve stable IDs.
 
 The settings model permits an empty reminder array. Deleting all reminders is valid.
+
+A reminder with an empty trimmed name or message is invalid for saving. Inline editing may temporarily produce an invalid draft, but Save must remain disabled and/or present a clear validation error until all reminders are valid. Normalization must not silently invent replacement names/messages for user-created reminders.
 
 ## Persistence and Migration
 
@@ -217,9 +221,9 @@ Conceptually:
 private var reminderDeadlines: [UUID: TimeInterval]
 ```
 
-`BreakConfiguration` should carry the reminder timing data required by the scheduler instead of dedicated Blink/Posture seconds and booleans.
+The scheduler configuration must carry generic reminder timing data instead of dedicated Blink/Posture seconds and booleans.
 
-A practical configuration shape is a list of enabled reminder schedules, for example:
+A practical shape is:
 
 ```swift
 struct ReminderScheduleConfiguration: Equatable {
@@ -228,11 +232,7 @@ struct ReminderScheduleConfiguration: Equatable {
 }
 ```
 
-and:
-
-```swift
-var reminders: [ReminderScheduleConfiguration]
-```
+with a collection of enabled reminder schedule configurations.
 
 The state machine should produce reminder events by reminder ID rather than distinct Blink/Posture event cases.
 
@@ -244,6 +244,24 @@ case reminder(UUID)
 
 or an equivalent event payload.
 
+Reminder presentation duration is not scheduling state and should no longer be required inside `BreakConfiguration`; presentation code should read the current global reminder duration directly from settings.
+
+### Configuration Updates
+
+Reminder changes must not accidentally restart the main work timer.
+
+Scheduler configuration updates should distinguish core break timing from reminder timing:
+
+- Changing work/break timing keeps the existing behavior of starting a fresh work session when appropriate.
+- Reordering reminders preserves all reminder deadlines because order does not change timing.
+- Editing a reminder name or message does not affect scheduler state.
+- Adding or enabling a reminder starts that reminder at `now + interval`.
+- Removing or disabling a reminder removes its deadline.
+- Changing a reminder interval restarts only that reminder at `now + newInterval`.
+- Unchanged enabled reminders preserve their existing remaining time.
+
+The implementation may achieve this through separate core/reminder configuration APIs or through one reconciliation method, but these semantics are required.
+
 ### Scheduling Semantics
 
 Preserve current timer behavior:
@@ -252,14 +270,13 @@ Preserve current timer behavior:
 - Reminder clocks pause outside Working Hours.
 - Sleep freezes reminder timing.
 - Waking must not replay a backlog of missed reminders.
-- A completed break starts a fresh reminder cycle.
-- Updating timing configuration starts fresh timing consistently with the existing settings semantics.
+- A completed break starts a fresh reminder cycle for all enabled reminders.
 - Disabled reminders have no active deadline.
-- Adding, removing, enabling, disabling, reordering, or changing a reminder interval must not leave stale scheduler state behind.
+- Configuration changes must not leave stale deadline state behind.
 
 When several reminders become due in the same scheduler advance:
 
-- Emit all due reminder IDs together during that tick.
+- Emit all due reminder IDs during that tick.
 - Advance each due reminder deadline from the current monotonic time, not from its stale prior deadline, so delayed callbacks do not produce catch-up storms.
 
 ## Reminder Presentation
@@ -284,11 +301,12 @@ Each reminder appears as a compact card.
 
 The header contains:
 
+- A drag handle for discoverable reordering
 - Enabled toggle
-- Reminder name
+- Editable reminder name
 - Delete/trash button aligned to the trailing edge
 
-The card name is editable inline. The name is not merely a title copied from a hidden model.
+The card itself should not be draggable from text fields or other interactive controls; the handle is the reorder affordance.
 
 ### Card Body
 
@@ -303,7 +321,7 @@ Deleting a card modifies only the Settings draft. There is no confirmation dialo
 
 ### Reordering
 
-Reminder cards support drag-and-drop reordering. Order is persisted and also defines the order in which simultaneously due reminder messages are combined.
+Reminder cards support drag-and-drop reordering through the handle. Order is persisted and also defines the order in which simultaneously due reminder messages are combined. Reordering alone does not reset reminder timers.
 
 ## Add Reminder Modal
 
@@ -353,13 +371,15 @@ Label column | Control column
 Rules:
 
 - Every control column begins at the same horizontal x-position within a settings page/card.
-- Labels use a stable width sized for the longest normal labels without making the window excessively wide.
+- Labels use one stable width within a page/card rather than deriving control position from the end of each label.
 - Controls do not stretch to the far right edge merely because space exists.
 - Pickers, text fields, and numeric controls use sensible explicit widths.
 - Numeric controls keep number, unit, and stepper together as one control cluster.
 - Picker and text-field leading edges align with numeric-control leading edges.
 - Message fields can be wider than numeric controls, but start at the same control-column position.
 - Section contents do not stretch to the full window width.
+
+Use a compact target rather than the current 220-point label column. Implementation should start around a 180-point label column and tune only if real labels require it. The content column should remain bounded rather than filling the window.
 
 ### Density
 
@@ -373,7 +393,7 @@ Reduce vertical and horizontal spacing from the current settings implementation:
 
 Only actionable warnings and errors appear as extra text.
 
-The settings window may remain resizable, but the content should have a compact preferred size. The UI must not rely on an unnecessarily tall minimum height to look correct.
+The settings window may remain resizable, but its preferred/minimum geometry should be reduced. As a concrete usability target, the default General and Breaks pages should fit in roughly a 700x500 window without vertical scrolling. The Reminders page may scroll when the user creates enough cards to exceed that height.
 
 ## Working Hours Move
 
@@ -401,7 +421,7 @@ Move:
 
 to Appearance > Reminder Presentation.
 
-`bannerPosition` should live visually with reminder presentation even if the current code also uses banner-like presentation elsewhere. If implementation reveals it is genuinely shared by multiple feature families, the label can be generalized while preserving this placement.
+The existing `bannerPosition` behavior remains shared by compact reminder and advance-warning banners; only its settings location changes.
 
 ## Error Handling
 
@@ -412,6 +432,7 @@ Keep inline warnings/errors for cases such as:
 - Login item approval required
 - Login item registration unavailable
 - No Working Hours days selected
+- Invalid reminder name/message blocking Save
 - Sound preview unavailable
 - Settings save failure
 
@@ -431,6 +452,7 @@ Add tests that verify:
 - Empty reminder arrays round-trip correctly.
 - Reminder IDs and order round-trip correctly.
 - Reminder normalization clamps intervals and cleans names/messages.
+- Invalid blank names/messages cannot be saved silently.
 
 ### Scheduler Tests
 
@@ -440,11 +462,15 @@ Replace Blink/Posture-specific scheduler tests with generic reminder tests cover
 - Independent intervals
 - Enabled/disabled state
 - Add/remove/configuration updates
+- Reordering without deadline reset
+- Name/message edits without deadline reset
+- Interval edits resetting only the edited reminder
 - Pausing and resuming
 - Sleep/wake
 - Break reset behavior
 - Multiple reminders due on the same tick
 - No catch-up backlog after delayed callbacks
+- Reminder-only edits not resetting the main work deadline
 
 ### App Integration Tests
 
@@ -463,6 +489,7 @@ Keep structural regression checks and update them to enforce the new architectur
 - Working Hours appears under General.
 - Reminder Presentation appears under Appearance, not Reminders.
 - Reminders UI is generated from `AppSettings.reminders`, not hardcoded Blink/Posture sections.
+- Add Reminder opens a creation sheet/modal.
 - Shared row components/grid are used for picker, text, and numeric rows.
 - Helper-note prose remains absent.
 
@@ -475,13 +502,14 @@ Likely implementation areas:
 - `AppSettings.swift`
   - Reminder model
   - defaults
-  - normalization
+  - normalization/validation
   - Codable migration
   - generic reminder configuration conversion
 - `BreakSchedule.swift`
   - generic reminder deadlines
   - reminder-ID events
   - generic pause/resume/sleep/reset behavior
+  - configuration reconciliation without unintended work-timer reset
 - `SettingsView.swift`
   - new tab structure
   - Working Hours move
@@ -520,11 +548,13 @@ The work is complete when all of the following are true:
 2. Existing Blink/Posture user configuration migrates without loss.
 3. Users can add reminders through a modal and edit/delete/reorder all reminders through cards.
 4. The scheduler supports an arbitrary reminder collection without Blink/Posture-specific fields, deadlines, or event cases.
-5. Simultaneous reminders produce one combined presentation.
-6. Schedule is removed and Working Hours appears under General.
-7. Reminder Presentation appears under Appearance.
-8. The Reminders tab contains only the reminder collection UI and Add Reminder action.
-9. Settings controls share a consistent aligned control column and are materially more compact than the current UI.
-10. Ordinary settings contain no explanatory helper paragraphs; only actionable warnings/errors remain.
-11. Global reminder sound and presentation behavior remains functional.
-12. Migration, scheduler, settings-structure, and build/regression tests pass before merge.
+5. Reminder-only edits do not restart the main work timer; scheduling state reconciles by reminder ID.
+6. Simultaneous reminders produce one combined presentation.
+7. Schedule is removed and Working Hours appears under General.
+8. Reminder Presentation appears under Appearance.
+9. The Reminders tab contains only the reminder collection UI and Add Reminder action.
+10. Settings controls share a consistent aligned control column and are materially more compact than the current UI.
+11. Default General and Breaks pages fit at approximately 700x500 without vertical scrolling.
+12. Ordinary settings contain no explanatory helper paragraphs; only actionable warnings/errors remain.
+13. Global reminder sound and presentation behavior remains functional.
+14. Migration, scheduler, settings-structure, and build/regression tests pass before merge.
