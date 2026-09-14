@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pauseItem: NSMenuItem?
     private var breakItem: NSMenuItem?
     private var settingsItem: NSMenuItem?
+    private var updateItem: NSMenuItem?
+    private var updateSuccessPopover: NSPopover?
     private let overlayController = OverlayController()
     private let popupBanner = PopupBannerController()
     private let settingsStore = SettingsStore()
@@ -21,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBar()
+        updateController.onStateChange = { [weak self] state in self?.applyUpdateState(state) }
+        applyUpdateState(updateController.state)
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(self, selector: #selector(systemWillSleep(_:)),
                               name: NSWorkspace.willSleepNotification, object: nil)
@@ -34,6 +38,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateController.startAutomaticChecks { [weak self] in
             guard let self else { return false }
             return self.schedule.phase != .onBreak && !self.schedule.isSleeping
+        }
+        if let version = updateController.successfulUpdateVersionOnLaunch() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.showUpdateSuccessPopover(version: version)
+            }
         }
     }
 
@@ -59,9 +68,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.target = self
         menu.addItem(settings)
         settingsItem = settings
-        let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        let updates = NSMenuItem(title: "Checking for updates…", action: #selector(handleUpdateMenuItem), keyEquivalent: "")
         updates.target = self
+        updates.isEnabled = false
         menu.addItem(updates)
+        updateItem = updates
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit LookAway", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
@@ -79,8 +90,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.showSettings()
     }
 
-    @objc private func checkForUpdates() {
-        updateController.checkManually()
+    @objc private func handleUpdateMenuItem() {
+        switch updateController.state {
+        case .updateAvailable:
+            updateController.installAvailableUpdate()
+        case .failed:
+            updateController.checkNow()
+        default:
+            break
+        }
+    }
+
+    private func applyUpdateState(_ state: UpdateState) {
+        guard let item = updateItem else { return }
+        switch state {
+        case .checking:
+            item.title = "Checking for updates…"
+            item.isEnabled = false
+        case .upToDate:
+            item.title = "App is up to date"
+            item.isEnabled = false
+        case .updateAvailable(let manifest):
+            item.title = "Update to version \(manifest.version)"
+            item.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
+        case .installing(let version):
+            item.title = "Updating to version \(version)…"
+            item.isEnabled = false
+        case .failed:
+            item.title = "Unable to check for updates"
+            item.isEnabled = true
+        }
+    }
+
+    private func showUpdateSuccessPopover(version: String) {
+        guard let button = statusItem?.button else { return }
+        updateSuccessPopover?.close()
+
+        let title = NSTextField(labelWithString: "LookAway updated successfully")
+        title.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+        let detail = NSTextField(labelWithString: "You’re now running version \(version).")
+        detail.textColor = .secondaryLabelColor
+        detail.font = NSFont.systemFont(ofSize: 12)
+        detail.lineBreakMode = .byWordWrapping
+        detail.maximumNumberOfLines = 0
+
+        let stack = NSStackView(views: [title, detail])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let controller = NSViewController()
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 270, height: 76))
+        controller.view = view
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: view.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 270, height: 76)
+        popover.contentViewController = controller
+        updateSuccessPopover = popover
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
     private func applySettings(_ value: AppSettings) throws {
@@ -235,6 +312,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             && (schedule.phase == .working || activeHours.ownsPause || allowedNow)
         breakItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
         settingsItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
+        if case .updateAvailable(let manifest) = updateController.state {
+            updateItem?.title = "Update to version \(manifest.version)"
+            updateItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping
+        }
     }
 
     @objc private func systemWillSleep(_ notification: Notification) {
@@ -249,6 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func systemDidWake(_ notification: Notification) {
         schedule.wake(at: now)
         startHeartbeat()
+        updateController.checkNow()
     }
 
     @objc private func screensChanged(_ notification: Notification) {
@@ -268,6 +350,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.removeObserver(self)
         popupBanner.hide()
         overlayController.hide(cleanupOnly: true)
+        updateSuccessPopover?.close()
         soundPlayer.stop()
         settingsWindowController?.close()
     }
