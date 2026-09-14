@@ -147,8 +147,8 @@ struct AppSettings: Codable, Equatable {
     var activeStartMinute = 9 * 60
     var activeEndMinute = 17 * 60
 
-    // Temporary source-compatibility accessors while the UI and scheduler migrate to reminders.
-    // They are computed, never encoded, and are removed once all runtime callers use reminders directly.
+    // Temporary source-compatibility accessors while the UI migrates to reminders.
+    // They are computed, never encoded, and are removed once all callers use reminders directly.
     var blinkEnabled: Bool {
         get { reminder(id: Reminder.blinkID)?.enabled ?? false }
         set { updateSeedReminder(.defaultBlink) { $0.enabled = newValue } }
@@ -230,17 +230,14 @@ struct AppSettings: Codable, Equatable {
 
     var breakConfiguration: BreakConfiguration {
         let value = normalized
-        let blink = value.reminder(id: Reminder.blinkID)
-        let posture = value.reminder(id: Reminder.postureID)
         return BreakConfiguration(
             workSeconds: value.workMinutes * 60,
             breakSeconds: value.breakSeconds,
-            blinkSeconds: (blink?.intervalMinutes ?? Reminder.defaultBlink.intervalMinutes) * 60,
-            postureSeconds: (posture?.intervalMinutes ?? Reminder.defaultPosture.intervalMinutes) * 60,
             warningSeconds: value.warningEnabled ? value.warningSeconds : 0,
-            reminderSeconds: value.reminderSeconds,
-            blinkEnabled: blink?.enabled ?? false,
-            postureEnabled: posture?.enabled ?? false
+            reminders: value.reminders.filter(\.enabled).map {
+                ReminderScheduleConfiguration(id: $0.id, intervalSeconds: $0.intervalMinutes * 60)
+            },
+            reminderSeconds: value.reminderSeconds
         )
     }
 
