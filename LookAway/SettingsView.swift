@@ -9,6 +9,9 @@ struct SettingsView: View {
     let onClose: () -> Void
     @State private var soundPreviewFailed = false
 
+    private let labelWidth: CGFloat = 220
+    private let sectionWidth: CGFloat = 620
+
     private var colorScheme: ColorScheme? {
         switch editor.draft.appearance {
         case .system: return nil
@@ -47,38 +50,34 @@ struct SettingsView: View {
     }
 
     private var general: some View {
-        Form {
-            Section("Startup") {
+        settingsPage {
+            settingsSection("Startup") {
                 Toggle("Launch at login", isOn: Binding(get: { login.isOn }, set: { login.setEnabled($0) }))
                     .accessibilityIdentifier("launchAtLogin")
-                note("Managed by macOS. Changes to launch at login apply immediately, independently of Save or Cancel. Install LookAway in Applications first.")
                 if login.status == .requiresApproval {
-                    Text("Approval is needed in System Settings before LookAway can start at login.")
-                        .foregroundStyle(.orange)
+                    warning("Approval is needed in System Settings before LookAway can start at login.")
                 }
                 if login.status == .unavailable {
-                    note("Login registration is unavailable for this build. Check that you are running an installed, locally signed app.")
+                    warning("Login registration is unavailable for this build.")
                 }
                 if let message = login.errorMessage {
-                    Text(message).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    errorText(message)
                 }
                 Button("Open Login Items Settings", action: login.manageInSystemSettings)
                 Toggle("Start with the timer paused", isOn: $editor.draft.startPaused)
-                note("Applies the next time LookAway launches. It does not pause the current session.")
             }
-            Section("Menu bar") {
+            sectionDivider
+            settingsSection("Menu bar") {
                 Toggle("Show countdown", isOn: $editor.draft.showCountdown)
                 Toggle("Include seconds", isOn: $editor.draft.showCountdownSeconds)
                     .disabled(!editor.draft.showCountdown)
-                note("Without seconds, remaining minutes are rounded up. The icon and tooltip remain available when the countdown is hidden.")
             }
         }
-        .formStyle(.grouped)
     }
 
     private var breaks: some View {
-        Form {
-            Section("Timing") {
+        settingsPage {
+            settingsSection("Timing") {
                 Menu("Apply a timing preset") {
                     ForEach(TimingPreset.allCases) { preset in
                         Button(preset.title) { editor.draft = editor.draft.applying(preset) }
@@ -87,7 +86,8 @@ struct SettingsView: View {
                 interval("Break every", value: $editor.draft.workMinutes, range: AppSettings.workMinutesRange, unit: "min")
                 interval("Break duration", value: $editor.draft.breakSeconds, range: AppSettings.breakSecondsRange, unit: "sec")
             }
-            Section("Before a break") {
+            sectionDivider
+            settingsSection("Before a break") {
                 Toggle("Advance warning", isOn: $editor.draft.warningEnabled)
                 if editor.draft.warningEnabled {
                     interval("Warn before break", value: $editor.draft.warningSeconds,
@@ -97,21 +97,20 @@ struct SettingsView: View {
                     interval("Postpone by", value: $editor.draft.snoozeMinutes, range: 1...60, unit: "min")
                 }
             }
-            Section("During a break") {
+            sectionDivider
+            settingsSection("During a break") {
                 Toggle("Allow finishing early", isOn: $editor.draft.allowEarlyFinish)
                 if editor.draft.allowEarlyFinish {
                     interval("Enable finish button after", value: $editor.draft.readyDelay,
                              range: editor.draft.readyDelayRange, unit: "sec")
                 }
-                note("With early finish off, the break ends automatically. LookAway can still be quit; this is not a device lock.")
             }
         }
-        .formStyle(.grouped)
     }
 
     private var reminders: some View {
-        Form {
-            Section("Blink") {
+        settingsPage {
+            settingsSection("Blink") {
                 Toggle("Blink reminders", isOn: $editor.draft.blinkEnabled)
                 if editor.draft.blinkEnabled {
                     interval("Remind every", value: $editor.draft.blinkMinutes,
@@ -119,7 +118,8 @@ struct SettingsView: View {
                     message("Blink message", text: $editor.draft.blinkMessage)
                 }
             }
-            Section("Posture") {
+            sectionDivider
+            settingsSection("Posture") {
                 Toggle("Posture reminders", isOn: $editor.draft.postureEnabled)
                 if editor.draft.postureEnabled {
                     interval("Remind every", value: $editor.draft.postureMinutes,
@@ -127,7 +127,8 @@ struct SettingsView: View {
                     message("Posture message", text: $editor.draft.postureMessage)
                 }
             }
-            Section("Presentation") {
+            sectionDivider
+            settingsSection("Presentation") {
                 Picker("Reminder style", selection: $editor.draft.reminderStyle) {
                     ForEach(ReminderStyle.allCases) { Text($0.title).tag($0) }
                 }
@@ -136,15 +137,13 @@ struct SettingsView: View {
                 }
                 interval("Show reminders for", value: $editor.draft.reminderSeconds,
                          range: AppSettings.reminderSecondsRange, unit: "sec")
-                note("Reminders let clicks pass through. Intervals restart after each break; choose an interval shorter than the work session. Display-under-pointer is selected when the reminder appears.")
             }
         }
-        .formStyle(.grouped)
     }
 
     private var schedule: some View {
-        Form {
-            Section("Working hours") {
+        settingsPage {
+            settingsSection("Working hours") {
                 Toggle("Only run during selected hours", isOn: $editor.draft.activeHoursEnabled)
                 if editor.draft.activeHoursEnabled {
                     HStack {
@@ -158,23 +157,16 @@ struct SettingsView: View {
                     DatePicker("From", selection: time($editor.draft.activeStartMinute), displayedComponents: .hourAndMinute)
                     DatePicker("Until", selection: time($editor.draft.activeEndMinute), displayedComponents: .hourAndMinute)
                     if editor.draft.activeWeekdays.isEmpty {
-                        Text("No days selected: automatic breaks and reminders will stay paused.")
-                            .foregroundStyle(.orange)
+                        warning("No days selected: automatic breaks and reminders will stay paused.")
                     }
-                    note("Uses your Mac's local time. Overnight hours belong to the starting day. Equal start and end times mean the entire selected day.")
                 }
             }
-            Section("Outside working hours") {
-                note("The work and reminder countdowns pause and resume when working hours begin. A break already in progress finishes normally. Start Break Now is always available outside an active break.")
-                note("Manual pauses never resume automatically. Use Keep Paused during a scheduled pause to stay paused when working hours begin, then Resume Timer during working hours.")
-            }
         }
-        .formStyle(.grouped)
     }
 
     private var appearance: some View {
-        Form {
-            Section("Window and displays") {
+        settingsPage {
+            settingsSection("Window and displays") {
                 Picker("Settings appearance", selection: $editor.draft.appearance) {
                     ForEach(AppAppearance.allCases) { Text($0.title).tag($0) }
                 }
@@ -184,63 +176,58 @@ struct SettingsView: View {
                 Picker("Banner position", selection: $editor.draft.bannerPosition) {
                     ForEach(BannerPosition.allCases) { Text($0.title).tag($0) }
                 }
-                note("Banner position applies to advance warnings and compact reminders. Display-under-pointer is selected when a presentation begins.")
             }
-            Section("Break screen") {
+            sectionDivider
+            settingsSection("Break screen") {
                 Toggle("Use a random break quote", isOn: $editor.draft.randomBreakQuoteEnabled)
                 message("Break message", text: $editor.draft.breakMessage)
                     .disabled(editor.draft.randomBreakQuoteEnabled)
-                if editor.draft.randomBreakQuoteEnabled {
-                    note("A new built-in quote is chosen when each break begins. Your custom message stays saved for when random quotes are turned off.")
-                }
                 Toggle("Show clock", isOn: $editor.draft.showClock)
                 Toggle("Show break countdown", isOn: $editor.draft.showBreakCountdown)
                 interval("Background dimming", value: $editor.draft.dimmingPercent, range: 0...90, unit: "%")
                 interval("Overlay text size", value: $editor.draft.textSizePercent, range: 80...150, unit: "%")
                 Toggle("Animate overlays and warnings", isOn: $editor.draft.animationsEnabled)
-                note("System Reduce Motion and Reduce Transparency are always respected. Overlay text remains white on a dark background.")
             }
-            Section("Preview") {
+            sectionDivider
+            settingsSection("Preview") {
                 Button("Preview Break Screen") { onPreview(editor.draft) }
                     .accessibilityIdentifier("previewBreakScreen")
-                note("Shows an 8-second preview on the selected display(s) using the current unsaved settings. It does not start or reset the break timer.")
             }
         }
-        .formStyle(.grouped)
     }
 
     private var sounds: some View {
-        Form {
-            Section("Play a sound") {
+        settingsPage {
+            settingsSection("Play a sound") {
                 Toggle("Before a break", isOn: $editor.draft.soundOnWarning)
                 Toggle("When a break starts", isOn: $editor.draft.soundOnBreakStart)
                 Toggle("When a break ends", isOn: $editor.draft.soundOnBreakEnd)
                 Toggle("With blink or posture reminders", isOn: $editor.draft.soundOnReminder)
             }
-            Section("Sound and volume") {
+            sectionDivider
+            settingsSection("Sound and volume") {
                 Picker("Sound", selection: $editor.draft.sound) {
                     ForEach(ReminderSound.allCases) { Text($0.rawValue).tag($0) }
                 }
                 interval("Volume", value: $editor.draft.volumePercent, range: 0...100, unit: "%")
                 Button("Preview Sound") { soundPreviewFailed = !soundPlayer.preview(settings: editor.draft) }
-                if soundPreviewFailed { Text("This sound is unavailable on this Mac.").foregroundStyle(.orange) }
-                note("All sounds are off by default. Preview uses the draft volume; playback also depends on your Mac's output volume. Volume zero is silent.")
+                if soundPreviewFailed {
+                    warning("This sound is unavailable on this Mac.")
+                }
             }
         }
-        .formStyle(.grouped)
         .onDisappear { soundPlayer.stop() }
     }
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
-            note("Saving timing changes starts a fresh work session. Paused timers stay paused; active breaks finish normally. Other preferences do not reset the timer.")
             if let error = editor.errorMessage {
-                Text(error).font(.callout).foregroundStyle(.red).accessibilityIdentifier("settingsSaveError")
+                errorText(error)
+                    .accessibilityIdentifier("settingsSaveError")
             }
             HStack {
                 Button("Restore Defaults", action: editor.restoreDefaults)
                     .accessibilityIdentifier("restoreSettingsDefaults")
-                    .help("Reset the draft. Launch at login is managed separately by macOS.")
                 Spacer()
                 Button("Cancel", action: onClose).keyboardShortcut(.cancelAction)
                 Button("Save") { if editor.apply() { onClose() } }
@@ -252,35 +239,81 @@ struct SettingsView: View {
         .padding(20)
     }
 
-    private func note(_ text: String) -> some View {
-        Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    private func settingsPage<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                content()
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            VStack(alignment: .leading, spacing: 10) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: sectionWidth, alignment: .leading)
+    }
+
+    private var sectionDivider: some View {
+        Divider()
+            .frame(maxWidth: sectionWidth)
+    }
+
+    private func warning(_ text: String) -> some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func errorText(_ text: String) -> some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.red)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func interval(_ title: String, value: Binding<Int>, range: ClosedRange<Int>, unit: String) -> some View {
         let bounded = Binding<Int>(get: { min(max(value.wrappedValue, range.lowerBound), range.upperBound) },
                                    set: { value.wrappedValue = min(max($0, range.lowerBound), range.upperBound) })
-        return LabeledContent(title) {
-            HStack(spacing: 8) {
-                TextField(title, value: bounded, format: .number.grouping(.never))
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 64)
-                    .accessibilityLabel(title)
-                Text(unit)
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-                Stepper(value: bounded, in: range) { EmptyView() }
-                    .labelsHidden()
-                    .fixedSize()
-            }
-            .fixedSize(horizontal: true, vertical: false)
+        return HStack(spacing: 10) {
+            Text(title)
+                .lineLimit(1)
+                .frame(width: labelWidth, alignment: .leading)
+            TextField(title, value: bounded, format: .number.grouping(.never))
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 64)
+                .accessibilityLabel(title)
+            Text(unit)
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .leading)
+            Stepper(value: bounded, in: range) { EmptyView() }
+                .labelsHidden()
+                .fixedSize()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func message(_ title: String, text: Binding<String>) -> some View {
-        TextField(title, text: Binding(get: { text.wrappedValue }, set: { text.wrappedValue = String($0.prefix(120)) }))
-            .textFieldStyle(.roundedBorder)
-            .help("Up to 120 characters. An empty message uses the default when saved.")
+        HStack(spacing: 10) {
+            Text(title)
+                .lineLimit(1)
+                .frame(width: labelWidth, alignment: .leading)
+            TextField(title, text: Binding(get: { text.wrappedValue }, set: { text.wrappedValue = String($0.prefix(120)) }))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 320)
+                .accessibilityLabel(title)
+        }
+        .frame(maxWidth: 550, alignment: .leading)
     }
 
     private func weekday(_ day: Int) -> Binding<Bool> {
