@@ -259,22 +259,21 @@ struct SettingsView: View {
     private func interval(_ title: String, value: Binding<Int>, range: ClosedRange<Int>, unit: String) -> some View {
         let bounded = Binding<Int>(get: { min(max(value.wrappedValue, range.lowerBound), range.upperBound) },
                                    set: { value.wrappedValue = min(max($0, range.lowerBound), range.upperBound) })
-        return HStack(spacing: 10) {
-            Text(title)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
-            TextField(title, value: bounded, format: .number.grouping(.never))
-                .textFieldStyle(.roundedBorder)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 64)
-                .accessibilityLabel(title)
-            Text(unit)
-                .foregroundStyle(.secondary)
-                .frame(width: 36, alignment: .leading)
-            Stepper(value: bounded, in: range) { EmptyView() }
-                .labelsHidden()
-                .fixedSize()
+        return LabeledContent(title) {
+            HStack(spacing: 8) {
+                TextField(title, value: bounded, format: .number.grouping(.never))
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 64)
+                    .accessibilityLabel(title)
+                Text(unit)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                Stepper(value: bounded, in: range) { EmptyView() }
+                    .labelsHidden()
+                    .fixedSize()
+            }
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
