@@ -147,38 +147,6 @@ struct AppSettings: Codable, Equatable {
     var activeStartMinute = 9 * 60
     var activeEndMinute = 17 * 60
 
-    // Temporary source-compatibility accessors while the UI migrates to reminders.
-    // They are computed, never encoded, and are removed once all callers use reminders directly.
-    var blinkEnabled: Bool {
-        get { reminder(id: Reminder.blinkID)?.enabled ?? false }
-        set { updateSeedReminder(.defaultBlink) { $0.enabled = newValue } }
-    }
-
-    var blinkMinutes: Int {
-        get { reminder(id: Reminder.blinkID)?.intervalMinutes ?? Reminder.defaultBlink.intervalMinutes }
-        set { updateSeedReminder(.defaultBlink) { $0.intervalMinutes = newValue } }
-    }
-
-    var blinkMessage: String {
-        get { reminder(id: Reminder.blinkID)?.message ?? Reminder.defaultBlink.message }
-        set { updateSeedReminder(.defaultBlink) { $0.message = newValue } }
-    }
-
-    var postureEnabled: Bool {
-        get { reminder(id: Reminder.postureID)?.enabled ?? false }
-        set { updateSeedReminder(.defaultPosture) { $0.enabled = newValue } }
-    }
-
-    var postureMinutes: Int {
-        get { reminder(id: Reminder.postureID)?.intervalMinutes ?? Reminder.defaultPosture.intervalMinutes }
-        set { updateSeedReminder(.defaultPosture) { $0.intervalMinutes = newValue } }
-    }
-
-    var postureMessage: String {
-        get { reminder(id: Reminder.postureID)?.message ?? Reminder.defaultPosture.message }
-        set { updateSeedReminder(.defaultPosture) { $0.message = newValue } }
-    }
-
     var warningSecondsRange: ClosedRange<Int> {
         let minutes = Self.clamp(workMinutes, to: Self.workMinutesRange)
         return 5...min(300, minutes * 60 - 1)
@@ -236,8 +204,7 @@ struct AppSettings: Codable, Equatable {
             warningSeconds: value.warningEnabled ? value.warningSeconds : 0,
             reminders: value.reminders.filter(\.enabled).map {
                 ReminderScheduleConfiguration(id: $0.id, intervalSeconds: $0.intervalMinutes * 60)
-            },
-            reminderSeconds: value.reminderSeconds
+            }
         )
     }
 
@@ -246,20 +213,6 @@ struct AppSettings: Codable, Equatable {
         value.workMinutes = preset.timing.work
         value.breakSeconds = preset.timing.rest
         return value.normalized
-    }
-
-    private func reminder(id: UUID) -> Reminder? {
-        reminders.first { $0.id == id }
-    }
-
-    private mutating func updateSeedReminder(_ fallback: Reminder, _ update: (inout Reminder) -> Void) {
-        if let index = reminders.firstIndex(where: { $0.id == fallback.id }) {
-            update(&reminders[index])
-        } else {
-            var reminder = fallback
-            update(&reminder)
-            reminders.append(reminder)
-        }
     }
 
     private static func clamp(_ value: Int, to range: ClosedRange<Int>) -> Int {
