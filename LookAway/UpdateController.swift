@@ -36,22 +36,43 @@ struct ReleaseVersion: Comparable, Equatable {
     }
 }
 
+enum UpdateState: Equatable {
+    case checking
+    case upToDate(version: String)
+    case updateAvailable(ReleaseManifest)
+    case installing(version: String)
+    case failed
+}
+
 @MainActor
 final class UpdateController {
+    static let pendingUpdateVersionKey = "LookAway.pendingUpdateVersion"
+
     private let manifestURL = URL(string: "https://github.com/longnt27/lookaway/releases/latest/download/latest.json")!
     private var timer: Timer?
     private var checking = false
     private var canInstall: () -> Bool = { true }
+    private var availableManifest: ReleaseManifest?
+    private let defaults: UserDefaults
+
+    private(set) var state: UpdateState = .checking {
+        didSet { onStateChange?(state) }
+    }
+    var onStateChange: ((UpdateState) -> Void)?
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     func startAutomaticChecks(canInstall: @escaping () -> Bool) {
         self.canInstall = canInstall
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.check(manual: false) }
+        timer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.check() }
         }
         Task {
-            try? await Task.sleep(for: .seconds(20))
-            await check(manual: false)
+            try? await Task.sleep(for: .seconds(5))
+            await check()
         }
     }
 
@@ -60,13 +81,47 @@ final class UpdateController {
         timer = nil
     }
 
-    func checkManually() {
-        Task { await check(manual: true) }
+    func checkNow() {
+        Task { await check() }
     }
 
-    private func check(manual: Bool) async {
+    func installAvailableUpdate() {
+        guard let manifest = availableManifest else {
+            checkNow()
+            return
+        }
+        guard canInstall() else {
+            showAlert(title: "Update ready later", message: "Finish the current break before updating.")
+            return
+        }
+        Task {
+            state = .installing(version: manifest.version)
+            do {
+                try await downloadAndInstall(manifest)
+            } catch {
+                state = .updateAvailable(manifest)
+                showAlert(title: "Update failed", message: error.localizedDescription)
+            }
+        }
+    }
+
+    func successfulUpdateVersionOnLaunch() -> String? {
+        guard let pending = defaults.string(forKey: Self.pendingUpdateVersionKey) else { return nil }
+        let current = currentVersion
+        guard ReleaseVersion(current) >= ReleaseVersion(pending) else { return nil }
+        defaults.removeObject(forKey: Self.pendingUpdateVersionKey)
+        return current
+    }
+
+    private var currentVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    }
+
+    private func check() async {
         guard !checking else { return }
         checking = true
+        let previousState = state
+        state = .checking
         defer { checking = false }
         do {
             let (data, response) = try await URLSession.shared.data(from: manifestURL)
@@ -76,18 +131,22 @@ final class UpdateController {
                   manifest.url.path.hasPrefix("/longnt27/lookaway/releases/download/") else {
                 throw UpdateError.untrustedURL
             }
-            let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-            guard ReleaseVersion(current) < ReleaseVersion(manifest.version) else {
-                if manual { showAlert(title: "LookAway is up to date", message: "You have version \(current).") }
-                return
+            let current = currentVersion
+            if ReleaseVersion(current) < ReleaseVersion(manifest.version) {
+                availableManifest = manifest
+                state = .updateAvailable(manifest)
+            } else {
+                availableManifest = nil
+                state = .upToDate(version: current)
             }
-            guard canInstall() else {
-                if manual { showAlert(title: "Update ready later", message: "Finish the current break before updating.") }
-                return
-            }
-            try await downloadAndInstall(manifest)
         } catch {
-            if manual { showAlert(title: "Update failed", message: error.localizedDescription) }
+            if case .updateAvailable = previousState {
+                state = previousState
+            } else if case .upToDate = previousState {
+                state = previousState
+            } else {
+                state = .failed
+            }
         }
     }
 
@@ -116,6 +175,8 @@ final class UpdateController {
               FileManager.default.isExecutableFile(atPath: staged.appendingPathComponent("Contents/MacOS/LookAway").path) else {
             throw UpdateError.invalidBundle
         }
+
+        defaults.set(manifest.version, forKey: Self.pendingUpdateVersionKey)
 
         let script = root.appendingPathComponent("install-update.sh")
         let body = """
