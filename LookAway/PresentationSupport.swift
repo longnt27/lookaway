@@ -45,11 +45,13 @@ enum SoundEvent: CaseIterable {
     /// Select at most one enabled sound; a muted warning must not suppress a reminder sound.
     static func selected(for events: [BreakSchedule.Event], settings: AppSettings) -> SoundEvent? {
         if events.contains(.warning), settings.soundOnWarning { return .warning }
-        let hasReminder = events.contains { event in
-            if case .reminder = event { return true }
+
+        let activeReminderIDs = Set(settings.reminders.filter(\.enabled).map(\.id))
+        let hasActiveReminder = events.contains { event in
+            if case .reminder(let id) = event { return activeReminderIDs.contains(id) }
             return false
         }
-        if hasReminder, settings.soundOnReminder { return .reminder }
+        if hasActiveReminder, settings.soundOnReminder { return .reminder }
         return nil
     }
 }
