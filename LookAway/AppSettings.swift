@@ -63,6 +63,20 @@ struct AppSettings: Codable, Equatable {
     static let breakSecondsRange = 5...600
     static let reminderMinutesRange = 1...120
     static let reminderSecondsRange = 1...15
+    static let breakQuotes = [
+        "Look far away and let your eyes reset.",
+        "Relax your shoulders and unclench your jaw.",
+        "Give your eyes a moment to focus on something distant.",
+        "Stand up, breathe slowly, and reset your posture.",
+        "Small pauses keep long sessions sustainable.",
+        "Your next task can wait for one quiet minute.",
+        "Blink slowly and let your eyes rehydrate.",
+        "Move a little now so your body complains less later.",
+        "Rest is part of the work, not a detour from it.",
+        "Notice something outside the screen.",
+        "Take a slow breath and soften your gaze.",
+        "Let your attention wander somewhere farther than this display."
+    ]
 
     var workMinutes = 30
     var breakSeconds = 30
@@ -85,6 +99,7 @@ struct AppSettings: Codable, Equatable {
     var showClock = true
     var showBreakCountdown = true
     var breakMessage = "Look away from your screen"
+    var randomBreakQuoteEnabled = false
     var blinkMessage = "Blink your eyes"
     var postureMessage = "Adjust your posture"
     var breakDisplays: DisplaySelection = .all
@@ -139,6 +154,12 @@ struct AppSettings: Codable, Equatable {
         return result
     }
 
+    var resolvedBreakMessage: String {
+        let value = normalized
+        guard value.randomBreakQuoteEnabled else { return value.breakMessage }
+        return Self.breakQuotes.randomElement() ?? value.breakMessage
+    }
+
     var breakConfiguration: BreakConfiguration {
         let value = normalized
         return BreakConfiguration(workSeconds: value.workMinutes * 60,
@@ -173,7 +194,7 @@ struct AppSettings: Codable, Equatable {
         case postureEnabled, postureMinutes, warningEnabled, warningSeconds, reminderSeconds, showCountdown
         case startPaused, showCountdownSeconds, allowSkip, snoozeMinutes, warningDuration
         case allowEarlyFinish, readyDelay, showClock, showBreakCountdown
-        case breakMessage, blinkMessage, postureMessage, breakDisplays, reminderDisplays
+        case breakMessage, randomBreakQuoteEnabled, blinkMessage, postureMessage, breakDisplays, reminderDisplays
         case reminderStyle, bannerPosition, appearance, dimmingPercent, textSizePercent, animationsEnabled
         case soundOnWarning, soundOnBreakStart, soundOnBreakEnd, soundOnReminder, sound, volumePercent
         case activeHoursEnabled, activeWeekdays, activeStartMinute, activeEndMinute
@@ -205,6 +226,7 @@ extension AppSettings {
         showClock = try v.decodeIfPresent(Bool.self, forKey: .showClock) ?? showClock
         showBreakCountdown = try v.decodeIfPresent(Bool.self, forKey: .showBreakCountdown) ?? showBreakCountdown
         breakMessage = try v.decodeIfPresent(String.self, forKey: .breakMessage) ?? breakMessage
+        randomBreakQuoteEnabled = try v.decodeIfPresent(Bool.self, forKey: .randomBreakQuoteEnabled) ?? randomBreakQuoteEnabled
         blinkMessage = try v.decodeIfPresent(String.self, forKey: .blinkMessage) ?? blinkMessage
         postureMessage = try v.decodeIfPresent(String.self, forKey: .postureMessage) ?? postureMessage
         // Unknown enum cases from a newer version fall back without losing known preferences.
