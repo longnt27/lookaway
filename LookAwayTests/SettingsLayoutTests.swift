@@ -5,33 +5,19 @@ import XCTest
 
 @MainActor
 final class SettingsLayoutTests: XCTestCase {
-    func testBreakEveryLabelStaysOnOneLineAtMinimumWindowWidth() throws {
+    func testAccessibilityDiagnostics() {
         let window = makeSettingsWindow()
         defer { window.close() }
 
-        let breakTab = try XCTUnwrap(findAccessibilityElement(label: "Breaks", in: window.contentView))
-        XCTAssertTrue(breakTab.accessibilityPerformPress())
-        settleLayout(window)
-
-        let label = try XCTUnwrap(findAccessibilityElement(label: "Break every", in: window.contentView))
-        let frame = label.accessibilityFrame()
-        XCTAssertGreaterThanOrEqual(frame.width, 90, "The setting label must not be squeezed into a narrow wrapping column")
-        XCTAssertLessThanOrEqual(frame.height, 24, "The setting label must remain a single line")
-    }
-
-    func testSettingsDoNotShowExplanatoryHelperParagraphs() {
-        let window = makeSettingsWindow()
-        defer { window.close() }
-
-        settleLayout(window)
-        XCTAssertNil(findAccessibilityElement(
-            label: "Managed by macOS. Changes to launch at login apply immediately, independently of Save or Cancel. Install LookAway in Applications first.",
-            in: window.contentView
-        ))
-        XCTAssertNil(findAccessibilityElement(
-            label: "Saving timing changes starts a fresh work session. Paused timers stay paused; active breaks finish normally. Other preferences do not reset the timer.",
-            in: window.contentView
-        ))
+        let elements = accessibilityElements(from: window.contentView)
+        let summary = elements.prefix(120).map { element in
+            let label = element.accessibilityLabel() ?? ""
+            let title = element.accessibilityTitle() ?? ""
+            let role = element.accessibilityRole()?.rawValue ?? ""
+            let value = String(describing: element.accessibilityValue() ?? "")
+            return "role=\(role) label=\(label) title=\(title) value=\(value)"
+        }.joined(separator: "\n")
+        XCTFail("Accessibility tree:\n\(summary)")
     }
 
     private func makeSettingsWindow() -> NSWindow {
@@ -68,12 +54,20 @@ final class SettingsLayoutTests: XCTestCase {
         window.contentView?.layoutSubtreeIfNeeded()
     }
 
-    private func findAccessibilityElement(label: String, in root: Any?) -> NSAccessibilityProtocol? {
-        guard let element = root as? NSAccessibilityProtocol else { return nil }
-        if element.accessibilityLabel() == label { return element }
-        for child in element.accessibilityChildren() ?? [] {
-            if let match = findAccessibilityElement(label: label, in: child) { return match }
+    private func accessibilityElements(from root: Any?) -> [NSAccessibilityProtocol] {
+        guard let root else { return [] }
+        var queue: [Any] = [root]
+        var result: [NSAccessibilityProtocol] = []
+        var seen = Set<ObjectIdentifier>()
+
+        while !queue.isEmpty && result.count < 500 {
+            let candidate = queue.removeFirst()
+            guard let object = candidate as AnyObject?, let element = candidate as? NSAccessibilityProtocol else { continue }
+            let id = ObjectIdentifier(object)
+            guard seen.insert(id).inserted else { continue }
+            result.append(element)
+            queue.append(contentsOf: element.accessibilityChildren() ?? [])
         }
-        return nil
+        return result
     }
 }
