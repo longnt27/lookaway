@@ -17,6 +17,19 @@ enum DisplaySelector {
     }
 }
 
+enum ReminderPresentationResolver {
+    static func message(for events: [BreakSchedule.Event], settings: AppSettings) -> String? {
+        let due = Set(events.compactMap { event -> UUID? in
+            if case .reminder(let id) = event { return id }
+            return nil
+        })
+        let messages = settings.reminders
+            .filter { $0.enabled && due.contains($0.id) }
+            .map(\.message)
+        return messages.isEmpty ? nil : messages.joined(separator: "\n")
+    }
+}
+
 enum SoundEvent: CaseIterable {
     case warning, breakStart, breakEnd, reminder
 
@@ -32,8 +45,11 @@ enum SoundEvent: CaseIterable {
     /// Select at most one enabled sound; a muted warning must not suppress a reminder sound.
     static func selected(for events: [BreakSchedule.Event], settings: AppSettings) -> SoundEvent? {
         if events.contains(.warning), settings.soundOnWarning { return .warning }
-        if settings.soundOnReminder,
-           events.contains(.blinkReminder) || events.contains(.postureReminder) { return .reminder }
+        let hasReminder = events.contains { event in
+            if case .reminder = event { return true }
+            return false
+        }
+        if hasReminder, settings.soundOnReminder { return .reminder }
         return nil
     }
 }
