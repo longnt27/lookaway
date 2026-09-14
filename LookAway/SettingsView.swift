@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject var editor: SettingsEditor
     @ObservedObject var login: LoginItemController
     let soundPlayer: SoundPlayer
+    let onPreview: (AppSettings) -> Void
     let onClose: () -> Void
     @State private var soundPreviewFailed = false
 
@@ -36,7 +37,7 @@ struct SettingsView: View {
             Divider()
             footer
         }
-        .frame(minWidth: 620, minHeight: 580)
+        .frame(minWidth: 700, minHeight: 580)
         .preferredColorScheme(colorScheme)
         .onAppear { login.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -186,7 +187,12 @@ struct SettingsView: View {
                 note("Banner position applies to advance warnings and compact reminders. Display-under-pointer is selected when a presentation begins.")
             }
             Section("Break screen") {
+                Toggle("Use a random break quote", isOn: $editor.draft.randomBreakQuoteEnabled)
                 message("Break message", text: $editor.draft.breakMessage)
+                    .disabled(editor.draft.randomBreakQuoteEnabled)
+                if editor.draft.randomBreakQuoteEnabled {
+                    note("A new built-in quote is chosen when each break begins. Your custom message stays saved for when random quotes are turned off.")
+                }
                 Toggle("Show clock", isOn: $editor.draft.showClock)
                 Toggle("Show break countdown", isOn: $editor.draft.showBreakCountdown)
                 interval("Background dimming", value: $editor.draft.dimmingPercent, range: 0...90, unit: "%")
@@ -194,16 +200,10 @@ struct SettingsView: View {
                 Toggle("Animate overlays and warnings", isOn: $editor.draft.animationsEnabled)
                 note("System Reduce Motion and Reduce Transparency are always respected. Overlay text remains white on a dark background.")
             }
-            Section("Preview — does not start a break") {
-                ZStack {
-                    OverlayBackground(settings: editor.draft.normalized)
-                    BreakContent(settings: editor.draft.normalized, remaining: editor.draft.normalized.breakSeconds,
-                                 readyDelay: 0, canFinish: true, onDone: {}, preview: true)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 320)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .accessibilityLabel("Break screen preview")
+            Section("Preview") {
+                Button("Preview Break Screen") { onPreview(editor.draft) }
+                    .accessibilityIdentifier("previewBreakScreen")
+                note("Shows an 8-second preview on the selected display(s) using the current unsaved settings. It does not start or reset the break timer.")
             }
         }
         .formStyle(.grouped)
@@ -259,16 +259,22 @@ struct SettingsView: View {
     private func interval(_ title: String, value: Binding<Int>, range: ClosedRange<Int>, unit: String) -> some View {
         let bounded = Binding<Int>(get: { min(max(value.wrappedValue, range.lowerBound), range.upperBound) },
                                    set: { value.wrappedValue = min(max($0, range.lowerBound), range.upperBound) })
-        return LabeledContent(title) {
-            HStack(spacing: 8) {
-                TextField(title, value: bounded, format: .number.grouping(.never))
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 64)
-                    .accessibilityLabel(title)
-                Text(unit).foregroundStyle(.secondary).frame(width: 28, alignment: .leading)
-                Stepper(title, value: bounded, in: range).labelsHidden()
-            }
+        return HStack(spacing: 10) {
+            Text(title)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+            TextField(title, value: bounded, format: .number.grouping(.never))
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 64)
+                .accessibilityLabel(title)
+            Text(unit)
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .leading)
+            Stepper(value: bounded, in: range) { EmptyView() }
+                .labelsHidden()
+                .fixedSize()
         }
     }
 

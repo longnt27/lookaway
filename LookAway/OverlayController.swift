@@ -87,6 +87,10 @@ final class OverlayController {
         onTickCallback = onTick
         presentationPointer = pointer()
         var snapshot = settings.normalized
+        if case .breakSession = mode {
+            snapshot.breakMessage = snapshot.resolvedBreakMessage
+            snapshot.randomBreakQuoteEnabled = false
+        }
         snapshot.animationsEnabled = snapshot.animationsEnabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         animated = snapshot.animationsEnabled
         let message: String

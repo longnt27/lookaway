@@ -7,6 +7,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let onApply: (AppSettings) throws -> Void
     private let login: LoginItemController
     private let soundPlayer = SoundPlayer()
+    private let previewOverlay = OverlayController()
     private(set) var editor: SettingsEditor?
 
     init(settings: @escaping () -> AppSettings,
@@ -15,12 +16,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         currentSettings = settings
         self.onApply = onApply
         self.login = login ?? LoginItemController()
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 760),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 760),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "LookAway Settings"
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 620, height: 620)
+        window.contentMinSize = NSSize(width: 700, height: 620)
         window.center()
         super.init(window: window)
         window.delegate = self
@@ -35,6 +36,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             editor = model
             window?.contentViewController = NSHostingController(rootView:
                 SettingsView(editor: model, login: login, soundPlayer: soundPlayer,
+                             onPreview: { [weak self] settings in self?.showPreview(settings) },
                              onClose: { [weak self] in self?.close() }))
         }
         login.refresh()
@@ -44,8 +46,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    private func showPreview(_ settings: AppSettings) {
+        var previewSettings = settings.normalized
+        previewSettings.breakSeconds = min(8, max(5, previewSettings.breakSeconds))
+        previewSettings.allowEarlyFinish = true
+        previewSettings.readyDelay = 0
+        previewOverlay.show(mode: .breakSession(seconds: 8), settings: previewSettings)
+    }
+
     func windowWillClose(_ notification: Notification) {
         soundPlayer.stop()
+        previewOverlay.hide(cleanupOnly: true)
         window?.contentViewController = nil
         editor = nil
     }
