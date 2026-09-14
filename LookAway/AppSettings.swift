@@ -56,6 +56,36 @@ enum TimingPreset: String, CaseIterable, Identifiable {
     }
 }
 
+struct Reminder: Codable, Equatable, Identifiable {
+    static let blinkID = UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
+    static let postureID = UUID(uuidString: "00000000-0000-4000-8000-000000000002")!
+
+    static let defaultBlink = Reminder(
+        id: blinkID,
+        name: "Blink",
+        message: "Blink your eyes",
+        intervalMinutes: 5,
+        enabled: true
+    )
+    static let defaultPosture = Reminder(
+        id: postureID,
+        name: "Posture",
+        message: "Adjust your posture",
+        intervalMinutes: 10,
+        enabled: true
+    )
+
+    var id: UUID = UUID()
+    var name: String
+    var message: String
+    var intervalMinutes: Int
+    var enabled: Bool
+}
+
+enum SettingsValidationError: Error, Equatable {
+    case invalidReminder(String)
+}
+
 /// User-facing units are kept separate from the scheduler's seconds.
 struct AppSettings: Codable, Equatable {
     static let defaults = AppSettings()
@@ -80,10 +110,7 @@ struct AppSettings: Codable, Equatable {
 
     var workMinutes = 30
     var breakSeconds = 30
-    var blinkEnabled = true
-    var blinkMinutes = 5
-    var postureEnabled = true
-    var postureMinutes = 10
+    var reminders: [Reminder] = [.defaultBlink, .defaultPosture]
     var warningEnabled = true
     var warningSeconds = 60
     var reminderSeconds = 2
@@ -100,8 +127,6 @@ struct AppSettings: Codable, Equatable {
     var showBreakCountdown = true
     var breakMessage = "Look away from your screen"
     var randomBreakQuoteEnabled = false
-    var blinkMessage = "Blink your eyes"
-    var postureMessage = "Adjust your posture"
     var breakDisplays: DisplaySelection = .all
     var reminderDisplays: DisplaySelection = .all
     var reminderStyle: ReminderStyle = .overlay
@@ -122,6 +147,38 @@ struct AppSettings: Codable, Equatable {
     var activeStartMinute = 9 * 60
     var activeEndMinute = 17 * 60
 
+    // Temporary source-compatibility accessors while the UI and scheduler migrate to reminders.
+    // They are computed, never encoded, and are removed once all runtime callers use reminders directly.
+    var blinkEnabled: Bool {
+        get { reminder(id: Reminder.blinkID)?.enabled ?? false }
+        set { updateSeedReminder(.defaultBlink) { $0.enabled = newValue } }
+    }
+
+    var blinkMinutes: Int {
+        get { reminder(id: Reminder.blinkID)?.intervalMinutes ?? Reminder.defaultBlink.intervalMinutes }
+        set { updateSeedReminder(.defaultBlink) { $0.intervalMinutes = newValue } }
+    }
+
+    var blinkMessage: String {
+        get { reminder(id: Reminder.blinkID)?.message ?? Reminder.defaultBlink.message }
+        set { updateSeedReminder(.defaultBlink) { $0.message = newValue } }
+    }
+
+    var postureEnabled: Bool {
+        get { reminder(id: Reminder.postureID)?.enabled ?? false }
+        set { updateSeedReminder(.defaultPosture) { $0.enabled = newValue } }
+    }
+
+    var postureMinutes: Int {
+        get { reminder(id: Reminder.postureID)?.intervalMinutes ?? Reminder.defaultPosture.intervalMinutes }
+        set { updateSeedReminder(.defaultPosture) { $0.intervalMinutes = newValue } }
+    }
+
+    var postureMessage: String {
+        get { reminder(id: Reminder.postureID)?.message ?? Reminder.defaultPosture.message }
+        set { updateSeedReminder(.defaultPosture) { $0.message = newValue } }
+    }
+
     var warningSecondsRange: ClosedRange<Int> {
         let minutes = Self.clamp(workMinutes, to: Self.workMinutesRange)
         return 5...min(300, minutes * 60 - 1)
@@ -135,8 +192,13 @@ struct AppSettings: Codable, Equatable {
         var result = self
         result.workMinutes = Self.clamp(workMinutes, to: Self.workMinutesRange)
         result.breakSeconds = Self.clamp(breakSeconds, to: Self.breakSecondsRange)
-        result.blinkMinutes = Self.clamp(blinkMinutes, to: Self.reminderMinutesRange)
-        result.postureMinutes = Self.clamp(postureMinutes, to: Self.reminderMinutesRange)
+        result.reminders = reminders.map { reminder in
+            var value = reminder
+            value.name = Self.cleanedText(reminder.name, limit: 120)
+            value.message = Self.cleanedText(reminder.message, limit: 120)
+            value.intervalMinutes = Self.clamp(reminder.intervalMinutes, to: Self.reminderMinutesRange)
+            return value
+        }
         result.warningSeconds = Self.clamp(warningSeconds, to: result.warningSecondsRange)
         result.reminderSeconds = Self.clamp(reminderSeconds, to: Self.reminderSecondsRange)
         result.snoozeMinutes = Self.clamp(snoozeMinutes, to: 1...60)
@@ -149,9 +211,15 @@ struct AppSettings: Codable, Equatable {
         result.activeEndMinute = Self.clamp(activeEndMinute, to: 0...1439)
         result.activeWeekdays = Array(Set(activeWeekdays.filter { (1...7).contains($0) })).sorted()
         result.breakMessage = Self.message(breakMessage, fallback: Self.defaults.breakMessage)
-        result.blinkMessage = Self.message(blinkMessage, fallback: Self.defaults.blinkMessage)
-        result.postureMessage = Self.message(postureMessage, fallback: Self.defaults.postureMessage)
         return result
+    }
+
+    var reminderValidationMessage: String? {
+        for reminder in normalized.reminders {
+            if reminder.name.isEmpty { return "Reminder name is required." }
+            if reminder.message.isEmpty { return "Reminder message is required." }
+        }
+        return nil
     }
 
     var resolvedBreakMessage: String {
@@ -162,56 +230,96 @@ struct AppSettings: Codable, Equatable {
 
     var breakConfiguration: BreakConfiguration {
         let value = normalized
-        return BreakConfiguration(workSeconds: value.workMinutes * 60,
-                                  breakSeconds: value.breakSeconds,
-                                  blinkSeconds: value.blinkMinutes * 60,
-                                  postureSeconds: value.postureMinutes * 60,
-                                  warningSeconds: value.warningEnabled ? value.warningSeconds : 0,
-                                  reminderSeconds: value.reminderSeconds,
-                                  blinkEnabled: value.blinkEnabled,
-                                  postureEnabled: value.postureEnabled)
+        let blink = value.reminder(id: Reminder.blinkID)
+        let posture = value.reminder(id: Reminder.postureID)
+        return BreakConfiguration(
+            workSeconds: value.workMinutes * 60,
+            breakSeconds: value.breakSeconds,
+            blinkSeconds: (blink?.intervalMinutes ?? Reminder.defaultBlink.intervalMinutes) * 60,
+            postureSeconds: (posture?.intervalMinutes ?? Reminder.defaultPosture.intervalMinutes) * 60,
+            warningSeconds: value.warningEnabled ? value.warningSeconds : 0,
+            reminderSeconds: value.reminderSeconds,
+            blinkEnabled: blink?.enabled ?? false,
+            postureEnabled: posture?.enabled ?? false
+        )
     }
 
     func applying(_ preset: TimingPreset) -> AppSettings {
         var value = self
         value.workMinutes = preset.timing.work
         value.breakSeconds = preset.timing.rest
-        // Presets only change the two advertised durations, not other preferences.
         return value.normalized
+    }
+
+    private func reminder(id: UUID) -> Reminder? {
+        reminders.first { $0.id == id }
+    }
+
+    private mutating func updateSeedReminder(_ fallback: Reminder, _ update: (inout Reminder) -> Void) {
+        if let index = reminders.firstIndex(where: { $0.id == fallback.id }) {
+            update(&reminders[index])
+        } else {
+            var reminder = fallback
+            update(&reminder)
+            reminders.append(reminder)
+        }
     }
 
     private static func clamp(_ value: Int, to range: ClosedRange<Int>) -> Int {
         min(max(value, range.lowerBound), range.upperBound)
     }
 
-    private static func message(_ value: String, fallback: String) -> String {
+    private static func cleanedText(_ value: String, limit: Int) -> String {
         let clean = value.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ")
-        return clean.isEmpty ? fallback : String(clean.prefix(120))
+        return String(clean.prefix(limit))
+    }
+
+    private static func message(_ value: String, fallback: String) -> String {
+        let clean = cleanedText(value, limit: 120)
+        return clean.isEmpty ? fallback : clean
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workMinutes, breakSeconds, blinkEnabled, blinkMinutes
-        case postureEnabled, postureMinutes, warningEnabled, warningSeconds, reminderSeconds, showCountdown
+        case workMinutes, breakSeconds, reminders
+        case warningEnabled, warningSeconds, reminderSeconds, showCountdown
         case startPaused, showCountdownSeconds, allowSkip, snoozeMinutes, warningDuration
         case allowEarlyFinish, readyDelay, showClock, showBreakCountdown
-        case breakMessage, randomBreakQuoteEnabled, blinkMessage, postureMessage, breakDisplays, reminderDisplays
+        case breakMessage, randomBreakQuoteEnabled, breakDisplays, reminderDisplays
         case reminderStyle, bannerPosition, appearance, dimmingPercent, textSizePercent, animationsEnabled
         case soundOnWarning, soundOnBreakStart, soundOnBreakEnd, soundOnReminder, sound, volumePercent
         case activeHoursEnabled, activeWeekdays, activeStartMinute, activeEndMinute
     }
+
+    private enum LegacyReminderKeys: String, CodingKey {
+        case blinkEnabled, blinkMinutes, blinkMessage
+        case postureEnabled, postureMinutes, postureMessage
+    }
 }
 
 extension AppSettings {
-    // Keep the v1 storage key and default missing fields: older preferences migrate in place.
+    // Keep the v1 storage key and migrate legacy Blink/Posture fields in place.
     init(from decoder: Decoder) throws {
         self.init()
         let v = try decoder.container(keyedBy: CodingKeys.self)
         workMinutes = try v.decodeIfPresent(Int.self, forKey: .workMinutes) ?? workMinutes
         breakSeconds = try v.decodeIfPresent(Int.self, forKey: .breakSeconds) ?? breakSeconds
-        blinkEnabled = try v.decodeIfPresent(Bool.self, forKey: .blinkEnabled) ?? blinkEnabled
-        blinkMinutes = try v.decodeIfPresent(Int.self, forKey: .blinkMinutes) ?? blinkMinutes
-        postureEnabled = try v.decodeIfPresent(Bool.self, forKey: .postureEnabled) ?? postureEnabled
-        postureMinutes = try v.decodeIfPresent(Int.self, forKey: .postureMinutes) ?? postureMinutes
+
+        if v.contains(.reminders) {
+            reminders = try v.decode([Reminder].self, forKey: .reminders)
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyReminderKeys.self)
+            var blink = Reminder.defaultBlink
+            blink.enabled = try legacy.decodeIfPresent(Bool.self, forKey: .blinkEnabled) ?? blink.enabled
+            blink.intervalMinutes = try legacy.decodeIfPresent(Int.self, forKey: .blinkMinutes) ?? blink.intervalMinutes
+            blink.message = try legacy.decodeIfPresent(String.self, forKey: .blinkMessage) ?? blink.message
+
+            var posture = Reminder.defaultPosture
+            posture.enabled = try legacy.decodeIfPresent(Bool.self, forKey: .postureEnabled) ?? posture.enabled
+            posture.intervalMinutes = try legacy.decodeIfPresent(Int.self, forKey: .postureMinutes) ?? posture.intervalMinutes
+            posture.message = try legacy.decodeIfPresent(String.self, forKey: .postureMessage) ?? posture.message
+            reminders = [blink, posture]
+        }
+
         warningEnabled = try v.decodeIfPresent(Bool.self, forKey: .warningEnabled) ?? warningEnabled
         warningSeconds = try v.decodeIfPresent(Int.self, forKey: .warningSeconds) ?? warningSeconds
         reminderSeconds = try v.decodeIfPresent(Int.self, forKey: .reminderSeconds) ?? reminderSeconds
@@ -227,9 +335,6 @@ extension AppSettings {
         showBreakCountdown = try v.decodeIfPresent(Bool.self, forKey: .showBreakCountdown) ?? showBreakCountdown
         breakMessage = try v.decodeIfPresent(String.self, forKey: .breakMessage) ?? breakMessage
         randomBreakQuoteEnabled = try v.decodeIfPresent(Bool.self, forKey: .randomBreakQuoteEnabled) ?? randomBreakQuoteEnabled
-        blinkMessage = try v.decodeIfPresent(String.self, forKey: .blinkMessage) ?? blinkMessage
-        postureMessage = try v.decodeIfPresent(String.self, forKey: .postureMessage) ?? postureMessage
-        // Unknown enum cases from a newer version fall back without losing known preferences.
         breakDisplays = (try? v.decode(DisplaySelection.self, forKey: .breakDisplays)) ?? breakDisplays
         reminderDisplays = (try? v.decode(DisplaySelection.self, forKey: .reminderDisplays)) ?? reminderDisplays
         reminderStyle = (try? v.decode(ReminderStyle.self, forKey: .reminderStyle)) ?? reminderStyle
@@ -270,6 +375,9 @@ final class SettingsStore {
     @discardableResult
     func save(_ candidate: AppSettings) throws -> Bool {
         let next = candidate.normalized
+        if let message = next.reminderValidationMessage {
+            throw SettingsValidationError.invalidReminder(message)
+        }
         guard next != value else { return false }
         let data = try JSONEncoder().encode(next)
         defaults.set(data, forKey: Self.storageKey)
