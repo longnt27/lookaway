@@ -1,73 +1,26 @@
-import AppKit
-import SwiftUI
+import Foundation
 import XCTest
 @testable import LookAway
 
-@MainActor
 final class SettingsLayoutTests: XCTestCase {
-    func testAccessibilityDiagnostics() {
-        let window = makeSettingsWindow()
-        defer { window.close() }
+    func testSettingsAvoidAdaptiveFormLabelLayout() throws {
+        let source = try settingsViewSource()
 
-        let elements = accessibilityElements(from: window.contentView)
-        let summary = elements.prefix(120).map { element in
-            let label = element.accessibilityLabel() ?? ""
-            let title = element.accessibilityTitle() ?? ""
-            let role = element.accessibilityRole()?.rawValue ?? ""
-            let value = String(describing: element.accessibilityValue() ?? "")
-            return "role=\(role) label=\(label) title=\(title) value=\(value)"
-        }.joined(separator: "\n")
-        XCTFail("Accessibility tree:\n\(summary)")
+        XCTAssertFalse(source.contains("Form {"), "Settings must not use macOS Form column sizing, which can collapse labels into narrow wrapping columns")
+        XCTAssertFalse(source.contains("LabeledContent("), "Numeric setting rows must own their label width instead of inheriting adaptive form columns")
     }
 
-    private func makeSettingsWindow() -> NSWindow {
-        let editor = SettingsEditor(settings: .defaults) { _ in }
-        let login = LoginItemController(
-            readStatus: { .disabled },
-            register: {},
-            unregister: {},
-            openSystemSettings: {}
-        )
-        let view = SettingsView(
-            editor: editor,
-            login: login,
-            soundPlayer: SoundPlayer(),
-            onPreview: { _ in },
-            onClose: {}
-        )
-        let host = NSHostingController(rootView: view)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 620),
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.contentViewController = host
-        window.makeKeyAndOrderFront(nil)
-        settleLayout(window)
-        return window
+    func testSettingsDoNotContainExplanatoryHelperParagraphs() throws {
+        let source = try settingsViewSource()
+
+        XCTAssertFalse(source.contains("private func note("), "Settings should keep only actionable warnings and errors, not explanatory helper paragraphs")
+        XCTAssertFalse(source.contains("note(\""), "Settings should not ship gray helper copy")
     }
 
-    private func settleLayout(_ window: NSWindow) {
-        window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-        window.contentView?.layoutSubtreeIfNeeded()
-    }
-
-    private func accessibilityElements(from root: Any?) -> [NSAccessibilityProtocol] {
-        guard let root else { return [] }
-        var queue: [Any] = [root]
-        var result: [NSAccessibilityProtocol] = []
-        var seen = Set<ObjectIdentifier>()
-
-        while !queue.isEmpty && result.count < 500 {
-            let candidate = queue.removeFirst()
-            guard let object = candidate as AnyObject?, let element = candidate as? NSAccessibilityProtocol else { continue }
-            let id = ObjectIdentifier(object)
-            guard seen.insert(id).inserted else { continue }
-            result.append(element)
-            queue.append(contentsOf: element.accessibilityChildren() ?? [])
-        }
-        return result
+    private func settingsViewSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let repositoryRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let settingsFile = repositoryRoot.appendingPathComponent("LookAway/SettingsView.swift")
+        return try String(contentsOf: settingsFile, encoding: .utf8)
     }
 }
