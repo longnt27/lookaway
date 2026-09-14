@@ -21,33 +21,33 @@ final class SettingsTests: XCTestCase {
         var settings = AppSettings.defaults
         settings.workMinutes = 45
         settings.breakSeconds = 90
-        settings.blinkMinutes = 7
-        settings.postureMinutes = 12
-        settings.blinkEnabled = false
+        settings.reminders[0].intervalMinutes = 7
+        settings.reminders[1].intervalMinutes = 12
+        settings.reminders[0].enabled = false
         settings.warningEnabled = false
+
         let config = settings.breakConfiguration
         XCTAssertEqual(config.workSeconds, 2700)
         XCTAssertEqual(config.breakSeconds, 90)
-        XCTAssertEqual(config.blinkSeconds, 420)
-        XCTAssertEqual(config.postureSeconds, 720)
-        XCTAssertFalse(config.blinkEnabled)
-        XCTAssertTrue(config.postureEnabled)
         XCTAssertEqual(config.warningSeconds, 0)
+        XCTAssertFalse(config.reminders.contains { $0.id == Reminder.blinkID })
+        XCTAssertEqual(config.reminders.first { $0.id == Reminder.postureID }?.intervalSeconds, 720)
+        XCTAssertEqual(settings.reminders[0].intervalMinutes, 7, "Disabled reminder settings remain stored in AppSettings")
     }
 
     func testExtremeValuesAreClampedBeforeArithmetic() {
         var settings = AppSettings.defaults
         settings.workMinutes = .max
         settings.breakSeconds = .min
-        settings.blinkMinutes = .min
-        settings.postureMinutes = .max
+        settings.reminders[0].intervalMinutes = .min
+        settings.reminders[1].intervalMinutes = .max
         settings.warningSeconds = .max
         settings.reminderSeconds = .min
         let value = settings.normalized
         XCTAssertEqual(value.workMinutes, 180)
         XCTAssertEqual(value.breakSeconds, 5)
-        XCTAssertEqual(value.blinkMinutes, 1)
-        XCTAssertEqual(value.postureMinutes, 120)
+        XCTAssertEqual(value.reminders[0].intervalMinutes, 1)
+        XCTAssertEqual(value.reminders[1].intervalMinutes, 120)
         XCTAssertEqual(value.warningSeconds, 300)
         XCTAssertEqual(value.reminderSeconds, 1)
         XCTAssertTrue(settings.breakConfiguration.isValid)
@@ -60,8 +60,8 @@ final class SettingsTests: XCTestCase {
         var settings = AppSettings.defaults
         settings.workMinutes = 1
         settings.breakSeconds = 600
-        settings.blinkMinutes = 120
-        settings.postureMinutes = 1
+        settings.reminders[0].intervalMinutes = 120
+        settings.reminders[1].intervalMinutes = 1
         settings.reminderSeconds = 15
         settings.warningSeconds = 0
         let value = settings.normalized
@@ -86,7 +86,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.workMinutes, 45)
         XCTAssertFalse(settings.showCountdown)
         XCTAssertEqual(settings.breakSeconds, 30)
-        XCTAssertTrue(settings.blinkEnabled)
+        XCTAssertEqual(settings.reminders, [.defaultBlink, .defaultPosture])
         XCTAssertTrue(settings.warningEnabled)
     }
 
@@ -127,10 +127,10 @@ final class SettingsTests: XCTestCase {
             var settings = AppSettings.defaults
             settings.workMinutes = 42
             settings.breakSeconds = 75
-            settings.blinkEnabled = false
-            settings.blinkMinutes = 8
-            settings.postureEnabled = false
-            settings.postureMinutes = 14
+            settings.reminders[0].enabled = false
+            settings.reminders[0].intervalMinutes = 8
+            settings.reminders[1].enabled = false
+            settings.reminders[1].intervalMinutes = 14
             settings.warningEnabled = false
             settings.warningSeconds = 20
             settings.reminderSeconds = 4
@@ -211,13 +211,17 @@ final class SettingsTests: XCTestCase {
     func testDisabledReminderRetainsItsChosenInterval() throws {
         try withDefaults { defaults in
             var settings = AppSettings.defaults
-            settings.blinkMinutes = 8
-            settings.blinkEnabled = false
+            settings.reminders[0].intervalMinutes = 8
+            settings.reminders[0].enabled = false
             let store = SettingsStore(defaults: defaults)
             try store.save(settings)
             var restored = SettingsStore(defaults: defaults).value
-            restored.blinkEnabled = true
-            XCTAssertEqual(restored.breakConfiguration.blinkSeconds, 480)
+            XCTAssertEqual(restored.reminders[0].intervalMinutes, 8)
+            restored.reminders[0].enabled = true
+            XCTAssertEqual(
+                restored.breakConfiguration.reminders.first { $0.id == Reminder.blinkID }?.intervalSeconds,
+                480
+            )
         }
     }
 
@@ -262,44 +266,47 @@ final class SettingsTests: XCTestCase {
 
 @MainActor
 final class SchedulerSettingsTests: XCTestCase {
-    func testBothRemindersCanBeDisabledWithoutDisablingBreaks() {
+    func testAllRemindersCanBeDisabledWithoutDisablingBreaks() {
         var config = BreakConfiguration()
-        config.blinkEnabled = false
-        config.postureEnabled = false
+        config.reminders = []
         var schedule = BreakSchedule(configuration: config, now: 0)
         XCTAssertEqual(schedule.advance(at: 600), [])
         XCTAssertEqual(schedule.advance(at: 1800), [.startBreak])
     }
 
-    func testReminderTogglesAreIndependent() {
-        for disableBlink in [true, false] {
-            var config = BreakConfiguration()
-            config.blinkEnabled = !disableBlink
-            config.postureEnabled = disableBlink
-            var schedule = BreakSchedule(configuration: config, now: 0)
-            XCTAssertEqual(schedule.advance(at: 600), disableBlink ? [.postureReminder] : [.blinkReminder])
-        }
+    func testEnabledReminderCollectionIsGeneric() {
+        let custom = UUID(uuidString: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA")!
+        var config = BreakConfiguration()
+        config.reminders = [ReminderScheduleConfiguration(id: custom, intervalSeconds: 600)]
+        var schedule = BreakSchedule(configuration: config, now: 0)
+        XCTAssertEqual(schedule.advance(at: 599), [])
+        XCTAssertEqual(schedule.advance(at: 600), [.reminder(custom)])
     }
 
-    func testWarningCanBeDisabledAndReenabled() {
+    func testWarningCanBeDisabledAndReenabledWithoutResettingWork() {
         var config = BreakConfiguration()
         config.warningSeconds = 0
-        config.blinkEnabled = false
-        config.postureEnabled = false
+        config.reminders = []
         var schedule = BreakSchedule(configuration: config, now: 0)
         XCTAssertEqual(schedule.advance(at: 1740), [])
         config.warningSeconds = 30
         schedule.updateConfiguration(config, at: 1740)
-        XCTAssertEqual(schedule.advance(at: 3509), [])
-        XCTAssertEqual(schedule.advance(at: 3510), [.warning])
+        XCTAssertEqual(schedule.remainingSeconds(at: 1740), 60)
+        XCTAssertEqual(schedule.advance(at: 1769), [])
+        XCTAssertEqual(schedule.advance(at: 1770), [.warning])
+        XCTAssertEqual(schedule.advance(at: 1800), [.startBreak])
     }
 
     func testCustomReminderIntervalsAreUsed() {
-        let settings = AppSettings(workMinutes: 20, blinkMinutes: 2, postureMinutes: 3)
+        let blink = Reminder(id: Reminder.blinkID, name: "Blink", message: "Blink", intervalMinutes: 2, enabled: true)
+        let posture = Reminder(id: Reminder.postureID, name: "Posture", message: "Posture", intervalMinutes: 3, enabled: true)
+        var settings = AppSettings.defaults
+        settings.workMinutes = 20
+        settings.reminders = [blink, posture]
         var schedule = BreakSchedule(configuration: settings.breakConfiguration, now: 0)
         XCTAssertEqual(schedule.advance(at: 119), [])
-        XCTAssertEqual(schedule.advance(at: 120), [.blinkReminder])
-        XCTAssertEqual(schedule.advance(at: 180), [.postureReminder])
+        XCTAssertEqual(schedule.advance(at: 120), [.reminder(Reminder.blinkID)])
+        XCTAssertEqual(schedule.advance(at: 180), [.reminder(Reminder.postureID)])
     }
 
     func testTimingChangeStartsFreshWorkAndClearsPendingSkip() {
@@ -312,7 +319,7 @@ final class SchedulerSettingsTests: XCTestCase {
         XCTAssertEqual(schedule.remainingSeconds(at: 100), 1200)
         XCTAssertFalse(schedule.skipsUpcomingBreak)
         XCTAssertEqual(schedule.advance(at: 399), [])
-        XCTAssertEqual(schedule.advance(at: 400), [.blinkReminder])
+        XCTAssertEqual(schedule.advance(at: 400), [.reminder(Reminder.blinkID)])
     }
 
     func testUnchangedOrDisplayOnlySettingsDoNotResetWorkOrSkip() {
@@ -344,7 +351,7 @@ final class SchedulerSettingsTests: XCTestCase {
         schedule.resume(at: 1000)
         XCTAssertEqual(schedule.remainingSeconds(at: 1001), 1199)
         XCTAssertEqual(schedule.advance(at: 1299), [])
-        XCTAssertEqual(schedule.advance(at: 1300), [.blinkReminder])
+        XCTAssertEqual(schedule.advance(at: 1300), [.reminder(Reminder.blinkID)])
     }
 
     func testChangingSettingsDuringSleepPreservesAutoResume() {
@@ -397,14 +404,17 @@ final class SchedulerSettingsTests: XCTestCase {
         XCTAssertEqual(schedule.configuration.breakSeconds, 60)
     }
 
-    func testReenablingRemindersStartsTheirIntervalsWithoutBacklog() {
+    func testReenablingReminderStartsItsIntervalWithoutBacklog() {
         var config = BreakConfiguration()
-        config.blinkEnabled = false
+        config.reminders.removeAll { $0.id == Reminder.blinkID }
         var schedule = BreakSchedule(configuration: config, now: 0)
         _ = schedule.advance(at: 900)
-        config.blinkEnabled = true
+        config.reminders.insert(
+            ReminderScheduleConfiguration(id: Reminder.blinkID, intervalSeconds: 300),
+            at: 0
+        )
         schedule.updateConfiguration(config, at: 900)
         XCTAssertEqual(schedule.advance(at: 901), [])
-        XCTAssertEqual(schedule.advance(at: 1200), [.blinkReminder])
+        XCTAssertEqual(schedule.advance(at: 1200), [.reminder(Reminder.blinkID)])
     }
 }

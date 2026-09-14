@@ -68,7 +68,7 @@ final class LookAwayTests: XCTestCase {
         schedule.finishBreak(at: 1830)
         XCTAssertEqual(schedule.remainingSeconds(at: 1830), 1800)
         XCTAssertEqual(schedule.advance(at: 2129), [])
-        XCTAssertEqual(schedule.advance(at: 2130), [.blinkReminder])
+        XCTAssertEqual(schedule.advance(at: 2130), [.reminder(Reminder.blinkID)])
     }
 
     func testDuplicateCompletionCannotResetNewWorkSession() {
@@ -88,7 +88,7 @@ final class LookAwayTests: XCTestCase {
         schedule.resume(at: 10000)
         XCTAssertEqual(schedule.remainingSeconds(at: 10000), 1700)
         XCTAssertEqual(schedule.advance(at: 10199), [])
-        XCTAssertEqual(schedule.advance(at: 10200), [.blinkReminder])
+        XCTAssertEqual(schedule.advance(at: 10200), [.reminder(Reminder.blinkID)])
     }
 
     func testPausePreservesFractionalTime() {
@@ -128,15 +128,21 @@ final class LookAwayTests: XCTestCase {
 
     func testSimultaneousRemindersAreBothReturned() {
         var schedule = BreakSchedule(now: 0)
-        XCTAssertEqual(schedule.advance(at: 300), [.blinkReminder])
-        XCTAssertEqual(schedule.advance(at: 600), [.blinkReminder, .postureReminder])
+        XCTAssertEqual(schedule.advance(at: 300), [.reminder(Reminder.blinkID)])
+        XCTAssertEqual(
+            schedule.advance(at: 600),
+            [.reminder(Reminder.blinkID), .reminder(Reminder.postureID)]
+        )
     }
 
     func testDelayedReminderDoesNotReplayABacklog() {
         var schedule = BreakSchedule(now: 0)
-        XCTAssertEqual(schedule.advance(at: 1000), [.blinkReminder, .postureReminder])
+        XCTAssertEqual(
+            schedule.advance(at: 1000),
+            [.reminder(Reminder.blinkID), .reminder(Reminder.postureID)]
+        )
         XCTAssertEqual(schedule.advance(at: 1001), [])
-        XCTAssertEqual(schedule.advance(at: 1300), [.blinkReminder])
+        XCTAssertEqual(schedule.advance(at: 1300), [.reminder(Reminder.blinkID)])
     }
 
     func testPostponementAddsFiveMinutesAndRearmsWarning() {
@@ -176,7 +182,7 @@ final class LookAwayTests: XCTestCase {
         XCTAssertEqual(schedule.phase, .working)
         XCTAssertEqual(schedule.remainingSeconds(at: 10000), 1700)
         XCTAssertEqual(schedule.advance(at: 10199), [])
-        XCTAssertEqual(schedule.advance(at: 10200), [.blinkReminder])
+        XCTAssertEqual(schedule.advance(at: 10200), [.reminder(Reminder.blinkID)])
     }
 
     func testUserPauseIsPreservedAfterSleep() {
@@ -207,13 +213,22 @@ final class LookAwayTests: XCTestCase {
     }
 
     func testConfigurationDrivesAllDeadlines() {
-        let config = BreakConfiguration(workSeconds: 100, breakSeconds: 5,
-                                        blinkSeconds: 10, postureSeconds: 20,
-                                        warningSeconds: 15, reminderSeconds: 1)
+        let config = BreakConfiguration(
+            workSeconds: 100,
+            breakSeconds: 5,
+            warningSeconds: 15,
+            reminders: [
+                ReminderScheduleConfiguration(id: Reminder.blinkID, intervalSeconds: 10),
+                ReminderScheduleConfiguration(id: Reminder.postureID, intervalSeconds: 20)
+            ]
+        )
         var schedule = BreakSchedule(configuration: config, now: 0)
         XCTAssertEqual(schedule.remainingSeconds(at: 0), 100)
-        XCTAssertEqual(schedule.advance(at: 10), [.blinkReminder])
-        XCTAssertEqual(schedule.advance(at: 20), [.blinkReminder, .postureReminder])
+        XCTAssertEqual(schedule.advance(at: 10), [.reminder(Reminder.blinkID)])
+        XCTAssertEqual(
+            schedule.advance(at: 20),
+            [.reminder(Reminder.blinkID), .reminder(Reminder.postureID)]
+        )
         XCTAssertTrue(schedule.advance(at: 86).contains(.warning))
         XCTAssertEqual(schedule.advance(at: 100), [.startBreak])
     }

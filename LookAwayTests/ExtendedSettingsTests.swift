@@ -30,8 +30,8 @@ final class ExtendedSettingsTests: XCTestCase {
         s.showClock = false
         s.showBreakCountdown = false
         s.breakMessage = "Take a breath"
-        s.blinkMessage = "Blink slowly"
-        s.postureMessage = "Relax your shoulders"
+        s.reminders[0].message = "Blink slowly"
+        s.reminders[1].message = "Relax your shoulders"
         s.breakDisplays = .primary
         s.reminderDisplays = .pointer
         s.reminderStyle = .banner
@@ -125,12 +125,13 @@ final class ExtendedSettingsTests: XCTestCase {
     func testMessagesAreBoundedAndWhitespaceIsCleaned() {
         var s = AppSettings.defaults
         s.breakMessage = "  Take\n a\t breath  "
-        s.blinkMessage = String(repeating: "a", count: 500)
-        s.postureMessage = " \n\t "
+        s.reminders[0].message = String(repeating: "a", count: 500)
+        s.reminders[1].message = " \n\t "
         let n = s.normalized
         XCTAssertEqual(n.breakMessage, "Take a breath")
-        XCTAssertEqual(n.blinkMessage.count, 120)
-        XCTAssertEqual(n.postureMessage, AppSettings.defaults.postureMessage)
+        XCTAssertEqual(n.reminders[0].message.count, 120)
+        XCTAssertEqual(n.reminders[1].message, "")
+        XCTAssertEqual(n.reminderValidationMessage, "Reminder message is required.")
         XCTAssertEqual(n.normalized, n)
     }
 
@@ -143,7 +144,7 @@ final class ExtendedSettingsTests: XCTestCase {
 
     func testPresetsOnlyChangeTimingAndDependentBounds() {
         var s = AppSettings.defaults
-        s.blinkEnabled = false
+        s.reminders[0].enabled = false
         s.volumePercent = 77
         s.reminderStyle = .banner
         s.activeHoursEnabled = true
@@ -151,7 +152,7 @@ final class ExtendedSettingsTests: XCTestCase {
             let n = s.applying(preset)
             XCTAssertEqual(n.workMinutes, preset.timing.work)
             XCTAssertEqual(n.breakSeconds, preset.timing.rest)
-            XCTAssertFalse(n.blinkEnabled)
+            XCTAssertFalse(n.reminders[0].enabled)
             XCTAssertEqual(n.volumePercent, 77)
             XCTAssertEqual(n.reminderStyle, .banner)
             XCTAssertTrue(n.activeHoursEnabled)
