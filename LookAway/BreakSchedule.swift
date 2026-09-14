@@ -12,9 +12,6 @@ struct BreakConfiguration: Equatable {
     var warningSeconds: Int
     var reminders: [ReminderScheduleConfiguration]
 
-    // Temporary presentation compatibility. Removed when AppDelegate reads reminder duration from AppSettings.
-    var reminderSeconds: Int
-
     init(
         workSeconds: Int = 30 * 60,
         breakSeconds: Int = 30,
@@ -22,79 +19,19 @@ struct BreakConfiguration: Equatable {
         reminders: [ReminderScheduleConfiguration] = [
             ReminderScheduleConfiguration(id: Reminder.blinkID, intervalSeconds: 5 * 60),
             ReminderScheduleConfiguration(id: Reminder.postureID, intervalSeconds: 10 * 60)
-        ],
-        reminderSeconds: Int = 2
+        ]
     ) {
         self.workSeconds = workSeconds
         self.breakSeconds = breakSeconds
         self.warningSeconds = warningSeconds
         self.reminders = reminders
-        self.reminderSeconds = reminderSeconds
-    }
-
-    // Transitional initializer for old tests/callers while they migrate to reminder IDs.
-    init(
-        workSeconds: Int,
-        breakSeconds: Int,
-        blinkSeconds: Int,
-        postureSeconds: Int,
-        warningSeconds: Int,
-        reminderSeconds: Int,
-        blinkEnabled: Bool = true,
-        postureEnabled: Bool = true
-    ) {
-        self.workSeconds = workSeconds
-        self.breakSeconds = breakSeconds
-        self.warningSeconds = warningSeconds
-        self.reminderSeconds = reminderSeconds
-        var schedules: [ReminderScheduleConfiguration] = []
-        if blinkEnabled {
-            schedules.append(.init(id: Reminder.blinkID, intervalSeconds: blinkSeconds))
-        }
-        if postureEnabled {
-            schedules.append(.init(id: Reminder.postureID, intervalSeconds: postureSeconds))
-        }
-        reminders = schedules
     }
 
     var isValid: Bool {
         let ids = reminders.map(\.id)
-        return workSeconds > 0 && breakSeconds > 0 && warningSeconds >= 0 && reminderSeconds > 0
+        return workSeconds > 0 && breakSeconds > 0 && warningSeconds >= 0
             && reminders.allSatisfy { $0.intervalSeconds > 0 }
             && Set(ids).count == ids.count
-    }
-
-    // Temporary source compatibility for the old two-reminder tests. Runtime scheduling is generic.
-    var blinkSeconds: Int {
-        get { reminders.first { $0.id == Reminder.blinkID }?.intervalSeconds ?? 5 * 60 }
-        set { setLegacyReminder(id: Reminder.blinkID, intervalSeconds: newValue, enabled: blinkEnabled) }
-    }
-
-    var postureSeconds: Int {
-        get { reminders.first { $0.id == Reminder.postureID }?.intervalSeconds ?? 10 * 60 }
-        set { setLegacyReminder(id: Reminder.postureID, intervalSeconds: newValue, enabled: postureEnabled) }
-    }
-
-    var blinkEnabled: Bool {
-        get { reminders.contains { $0.id == Reminder.blinkID } }
-        set { setLegacyReminder(id: Reminder.blinkID, intervalSeconds: blinkSeconds, enabled: newValue) }
-    }
-
-    var postureEnabled: Bool {
-        get { reminders.contains { $0.id == Reminder.postureID } }
-        set { setLegacyReminder(id: Reminder.postureID, intervalSeconds: postureSeconds, enabled: newValue) }
-    }
-
-    private mutating func setLegacyReminder(id: UUID, intervalSeconds: Int, enabled: Bool) {
-        reminders.removeAll { $0.id == id }
-        if enabled {
-            let item = ReminderScheduleConfiguration(id: id, intervalSeconds: intervalSeconds)
-            if id == Reminder.blinkID {
-                reminders.insert(item, at: 0)
-            } else {
-                reminders.append(item)
-            }
-        }
     }
 }
 
@@ -108,10 +45,6 @@ struct BreakSchedule {
     enum Event: Equatable {
         case warning, startBreak, skippedBreak
         case reminder(UUID)
-
-        // Temporary source compatibility while older tests and presentation routing migrate.
-        static var blinkReminder: Event { .reminder(Reminder.blinkID) }
-        static var postureReminder: Event { .reminder(Reminder.postureID) }
     }
 
     private(set) var configuration: BreakConfiguration
@@ -206,7 +139,6 @@ struct BreakSchedule {
 
         for reminder in configuration.reminders {
             guard let deadline = reminderDeadlines[reminder.id], now >= deadline else { continue }
-            // Rearm from now instead of replaying delayed intervals as a backlog.
             reminderDeadlines[reminder.id] = now + TimeInterval(reminder.intervalSeconds)
             events.append(.reminder(reminder.id))
         }
@@ -228,7 +160,6 @@ struct BreakSchedule {
         return true
     }
 
-    /// A manual break overrides a pending skip but never restarts an active break.
     @discardableResult
     mutating func startBreakNow() -> Bool {
         guard phase != .onBreak, !isSleeping else { return false }
