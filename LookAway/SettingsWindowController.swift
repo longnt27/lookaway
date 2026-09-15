@@ -16,12 +16,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         currentSettings = settings
         self.onApply = onApply
         self.login = login ?? LoginItemController()
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 500),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "LookAway Settings"
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 640, height: 460)
+        window.contentMinSize = NSSize(width: 540, height: 430)
         window.center()
         super.init(window: window)
         window.delegate = self
