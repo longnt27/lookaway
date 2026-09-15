@@ -37,7 +37,7 @@ struct SettingsView: View {
             Divider()
             footer
         }
-        .frame(minWidth: 640, minHeight: 430)
+        .frame(minWidth: 540, minHeight: 430)
         .preferredColorScheme(colorScheme)
         .onAppear { login.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -57,12 +57,6 @@ struct SettingsView: View {
 
                 SettingsToggleRow("Start with timer paused", isOn: $editor.draft.startPaused)
 
-                if login.status == .requiresApproval {
-                    warning("Approval is needed in System Settings before LookAway can start at login.")
-                    SettingsRow("Login items") {
-                        Button("Open System Settings", action: login.manageInSystemSettings)
-                    }
-                }
                 if login.status == .unavailable {
                     warning("Login registration is unavailable for this build.")
                 }

@@ -172,9 +172,16 @@ final class OverlayController {
             let frame = compact
                 ? BannerLayout.frame(in: screen.visibleFrame, position: settings.bannerPosition)
                 : screen.frame
-            let view = OverlayView(viewModel: model, mode: mode, onDone: { [weak self] in
-                self?.finishEarly(presentationID: id)
-            })
+            let view = OverlayView(
+                viewModel: model,
+                mode: mode,
+                onDone: { [weak self] in
+                    self?.finishEarly(presentationID: id)
+                },
+                onSkip: { [weak self] in
+                    self?.dismiss(presentationID: id)
+                }
+            )
             let window = OverlayWindow(contentRect: frame,
                                        styleMask: [.borderless, .nonactivatingPanel],
                                        backing: .buffered, defer: false)

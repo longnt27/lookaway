@@ -1,14 +1,14 @@
 import SwiftUI
 
 enum SettingsLayout {
-    static let pageWidth: CGFloat = 520
-    static let labelWidth: CGFloat = 170
+    static let pageWidth: CGFloat = 460
+    static let labelWidth: CGFloat = 145
     static let columnGap: CGFloat = 12
-    static let pickerWidth: CGFloat = 210
-    static let textWidth: CGFloat = 280
+    static let pickerWidth: CGFloat = 190
+    static let textWidth: CGFloat = 250
     static let numberWidth: CGFloat = 64
     static let unitWidth: CGFloat = 34
-    static let pagePadding: CGFloat = 18
+    static let pagePadding: CGFloat = 16
     static let sectionGap: CGFloat = 14
     static let rowGap: CGFloat = 8
     static let cardPadding: CGFloat = 12

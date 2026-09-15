@@ -31,6 +31,7 @@ struct BreakContent: View {
     let readyDelay: Int
     let canFinish: Bool
     let onDone: () -> Void
+    let onSkip: () -> Void
     var preview = false
 
     private var scale: CGFloat { CGFloat(settings.textSizePercent) / 100 }
@@ -55,15 +56,23 @@ struct BreakContent: View {
                     .accessibilityLabel("Break time remaining")
                     .accessibilityValue("\(remaining) seconds")
             }
-            if settings.allowEarlyFinish {
-                Button(action: onDone) {
-                    Text(readyDelay > 0 ? "I'm ready (\(readyDelay))" : "I'm ready")
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, preview ? 8 : 14)
+            if settings.allowSkip || settings.allowEarlyFinish {
+                HStack(spacing: 12) {
+                    if settings.allowSkip {
+                        Button("Skip Break", action: onSkip)
+                            .buttonStyle(ReadyButtonStyle(disabled: preview, compact: preview, secondary: true))
+                            .disabled(preview)
+                            .accessibilityIdentifier("skipBreak")
+                    }
+                    if settings.allowEarlyFinish {
+                        Button(action: onDone) {
+                            Text(readyDelay > 0 ? "I'm ready (\(readyDelay))" : "I'm ready")
+                        }
+                        .buttonStyle(ReadyButtonStyle(disabled: !canFinish || preview, compact: preview))
+                        .disabled(!canFinish || preview)
+                        .accessibilityIdentifier("finishBreak")
+                    }
                 }
-                .buttonStyle(ReadyButtonStyle(disabled: !canFinish, compact: preview))
-                .disabled(!canFinish || preview)
-                .accessibilityIdentifier("finishBreak")
             }
         }
         .padding(preview ? 16 : 32)
@@ -76,6 +85,7 @@ struct OverlayView: View {
     @ObservedObject var viewModel: OverlayViewModel
     let mode: OverlayMode
     let onDone: () -> Void
+    let onSkip: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPresented = false
 
@@ -90,9 +100,14 @@ struct OverlayView: View {
         ZStack {
             OverlayBackground(settings: viewModel.settings).ignoresSafeArea()
             if case .breakSession = mode {
-                BreakContent(settings: viewModel.settings, remaining: viewModel.remaining,
-                             readyDelay: viewModel.readyDelayRemaining,
-                             canFinish: viewModel.canFinishEarly, onDone: onDone)
+                BreakContent(
+                    settings: viewModel.settings,
+                    remaining: viewModel.remaining,
+                    readyDelay: viewModel.readyDelayRemaining,
+                    canFinish: viewModel.canFinishEarly,
+                    onDone: onDone,
+                    onSkip: onSkip
+                )
             } else {
                 Text(viewModel.message)
                     .font(.system(size: (isCompact ? 20 : 48) * CGFloat(viewModel.settings.textSizePercent) / 100,
@@ -119,14 +134,22 @@ struct OverlayView: View {
 struct ReadyButtonStyle: ButtonStyle {
     let disabled: Bool
     var compact = false
+    var secondary = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: compact ? 14 : 20, weight: .semibold))
-            .background(disabled ? Color.white.opacity(0.15) : Color.white)
-            .foregroundStyle(disabled ? Color.white.opacity(0.5) : Color.black)
+            .padding(.horizontal, 24)
+            .padding(.vertical, compact ? 8 : 14)
+            .background(background)
+            .foregroundStyle(disabled ? Color.white.opacity(0.5) : (secondary ? Color.white : Color.black))
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .opacity(configuration.isPressed ? 0.8 : 1)
+    }
+
+    private var background: Color {
+        if disabled { return Color.white.opacity(0.15) }
+        return secondary ? Color.white.opacity(0.2) : Color.white
     }
 }
