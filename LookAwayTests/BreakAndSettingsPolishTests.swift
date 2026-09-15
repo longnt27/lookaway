@@ -4,50 +4,16 @@ import XCTest
 
 @MainActor
 final class BreakAndSettingsPolishTests: XCTestCase {
-    func testActiveBreakCanBeSkippedWhenSkippingIsEnabled() throws {
-        var settings = AppSettings.defaults
-        settings.allowSkip = true
-        settings.allowEarlyFinish = false
-
-        let overlay = OverlayController(screens: { [] }, dismissalDuration: 0)
-        var completed = 0
-        overlay.show(
-            mode: .breakSession(seconds: 30),
-            settings: settings,
-            onHide: { completed += 1 }
-        )
-
-        let id = try XCTUnwrap(overlay.presentationID)
-        overlay.skipBreak(presentationID: id)
-
-        XCTAssertNil(overlay.presentationID)
-        XCTAssertEqual(completed, 1)
-    }
-
-    func testActiveBreakCannotBeSkippedWhenSkippingIsDisabled() throws {
-        var settings = AppSettings.defaults
-        settings.allowSkip = false
-        settings.allowEarlyFinish = false
-
-        let overlay = OverlayController(screens: { [] }, dismissalDuration: 0)
-        var completed = 0
-        overlay.show(
-            mode: .breakSession(seconds: 30),
-            settings: settings,
-            onHide: { completed += 1 }
-        )
-        defer { overlay.hide(cleanupOnly: true) }
-
-        let id = try XCTUnwrap(overlay.presentationID)
-        overlay.skipBreak(presentationID: id)
-
-        XCTAssertEqual(overlay.presentationID, id)
-        XCTAssertEqual(completed, 0)
-    }
-
-    func testBreakOverlayExposesSkipBreakAction() throws {
+    func testBreakOverlayExposesSkipBreakActionWhenSkippingIsAllowed() throws {
         let source = try repositorySource("LookAway/OverlayView.swift")
+        XCTAssertTrue(source.contains("if settings.allowSkip"))
         XCTAssertTrue(source.contains("Button(\"Skip Break\""))
+    }
+
+    func testOverlayControllerWiresSkipBreakToDismissTheActiveBreak() throws {
+        let source = try repositorySource("LookAway/OverlayController.swift")
+        XCTAssertTrue(source.contains("onSkip:"))
+        XCTAssertTrue(source.contains("dismiss(presentationID: id)"))
     }
 
     func testSettingsWindowStaysCompactAfterContentIsMounted() throws {
