@@ -120,18 +120,22 @@ struct BreakSchedule {
     mutating func advance(at now: TimeInterval) -> [Event] {
         guard phase == .working, !isSleeping else { return [] }
 
+        // Warning actions are processed through the same clock edge as every other
+        // scheduler transition. Consuming a skip starts a fresh work session now,
+        // rather than leaving the old deadline alive until it expires.
+        if skipsUpcomingBreak {
+            startWork(at: now)
+            return [.skippedBreak]
+        }
+
         // Breaks take priority over reminders due on the same tick.
         if now >= workDeadline {
-            if skipsUpcomingBreak {
-                startWork(at: now)
-                return [.skippedBreak]
-            }
             phase = .onBreak
             return [.startBreak]
         }
 
         var events: [Event] = []
-        if configuration.warningSeconds > 0, !hasWarned, !skipsUpcomingBreak,
+        if configuration.warningSeconds > 0, !hasWarned,
            workDeadline - now <= TimeInterval(configuration.warningSeconds) {
             hasWarned = true
             events.append(.warning)
