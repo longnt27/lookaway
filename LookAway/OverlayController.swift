@@ -177,9 +177,6 @@ final class OverlayController {
                 mode: mode,
                 onDone: { [weak self] in
                     self?.finishEarly(presentationID: id)
-                },
-                onSkip: { [weak self] in
-                    self?.dismiss(presentationID: id)
                 }
             )
             let window = OverlayWindow(contentRect: frame,
