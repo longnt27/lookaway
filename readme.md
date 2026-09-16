@@ -85,10 +85,9 @@ Schedule recurring work sessions and breaks with:
 - configurable work duration
 - configurable break duration
 - advance warnings
-- skip controls
+- a **Skip Break** action in the warning that immediately begins a fresh work interval
 - postpone controls
-- optional early finish
-- an actual **Skip Break** action during the active break when skipping is enabled
+- optional early finish once the break has actually started
 
 A break should be a break, not a hostage situation conducted by your own menu bar.
 
@@ -198,15 +197,12 @@ Click the icon to:
 
 Before a scheduled break, the warning can allow you to:
 
-- **Skip** the upcoming break
-- **Postpone** it
+- **Skip Break**, which closes the warning and immediately starts a fresh full work interval
+- **Postpone** the upcoming break by the configured amount
 
-During an active break, if those options are enabled, you can:
+Once a break has actually started, the skip decision has already passed. If early finishing is enabled, **I'm ready** can end the break after the configured delay.
 
-- **Skip Break**
-- finish early with **I'm ready** after the configured delay
-
-LookAway is meant to support your attention, not seize administrative control over your body.
+LookAway is meant to support your attention, not seize administrative control over your body. But apparently even a tiny timer app needs constitutional clarity about when a break may be vetoed.
 
 When your Mac sleeps, work and reminder timers pause rather than building a bureaucratic backlog of missed eye blinks to prosecute when you wake up.
 
@@ -322,19 +318,17 @@ You can choose whether it shows:
 
 If early finishing is enabled, **I'm ready** becomes available after the configured delay.
 
-If skipping is enabled, **Skip Break** is available directly on the active break screen.
+**Skip Break belongs to the warning before the break, not the active break screen.** Choosing it immediately starts a fresh work interval. Once the break screen appears, LookAway treats that break as underway rather than offering a second, semantically mysterious escape hatch.
 
-This distinction matters.
+Finishing early therefore means exactly what it says:
 
-Finishing early means:
+> "I started the break, took enough of it, and I'm ready to continue."
 
-> "I took enough of the break."
+Skip means:
 
-Skipping means:
+> "Do not start this break. Begin the next work interval now."
 
-> "Not now. I accept the consequences and will answer to my vertebrae later."
-
-Software should be capable of understanding the difference.
+Two actions. Two moments. One fewer state-machine gremlin.
 
 ---
 
