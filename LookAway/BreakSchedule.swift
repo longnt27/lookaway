@@ -49,6 +49,8 @@ struct BreakSchedule {
 
     private(set) var configuration: BreakConfiguration
     private(set) var phase: Phase = .working
+    /// Retained as observability for existing callers. Skipping is applied immediately;
+    /// this flag never defers a deadline or changes event emission.
     private(set) var skipsUpcomingBreak = false
     private(set) var isSleeping = false
 
@@ -58,6 +60,7 @@ struct BreakSchedule {
     private var pausedReminderRemaining: [UUID: TimeInterval] = [:]
     private var hasWarned = false
     private var resumesAfterSleep = false
+    private var lastObservedTime: TimeInterval
 
     init(configuration: BreakConfiguration = BreakConfiguration(), now: TimeInterval) {
         precondition(configuration.isValid)
@@ -66,6 +69,7 @@ struct BreakSchedule {
         reminderDeadlines = Dictionary(uniqueKeysWithValues: configuration.reminders.map {
             ($0.id, now + TimeInterval($0.intervalSeconds))
         })
+        lastObservedTime = now
     }
 
     /// Core work/break timing changes start a fresh work session. Reminder-only
@@ -118,20 +122,18 @@ struct BreakSchedule {
     }
 
     mutating func advance(at now: TimeInterval) -> [Event] {
+        lastObservedTime = now
         guard phase == .working, !isSleeping else { return [] }
 
         // Breaks take priority over reminders due on the same tick.
         if now >= workDeadline {
-            if skipsUpcomingBreak {
-                startWork(at: now)
-                return [.skippedBreak]
-            }
+            skipsUpcomingBreak = false
             phase = .onBreak
             return [.startBreak]
         }
 
         var events: [Event] = []
-        if configuration.warningSeconds > 0, !hasWarned, !skipsUpcomingBreak,
+        if configuration.warningSeconds > 0, !hasWarned,
            workDeadline - now <= TimeInterval(configuration.warningSeconds) {
             hasWarned = true
             events.append(.warning)
@@ -145,9 +147,17 @@ struct BreakSchedule {
         return events
     }
 
-    mutating func skipUpcomingBreak() {
-        guard phase == .working, !isSleeping else { return }
+    /// Skip means "start the next work interval now", not "remember to skip later".
+    /// The no-argument form uses the latest scheduler timestamp for compatibility;
+    /// UI actions should pass their current monotonic time explicitly.
+    @discardableResult
+    mutating func skipUpcomingBreak(at now: TimeInterval? = nil) -> Bool {
+        guard phase == .working, !isSleeping else { return false }
+        let skipTime = now ?? lastObservedTime
+        guard skipTime < workDeadline else { return false }
+        startWork(at: skipTime)
         skipsUpcomingBreak = true
+        return true
     }
 
     @discardableResult
@@ -251,5 +261,6 @@ struct BreakSchedule {
         pausedReminderRemaining = [:]
         skipsUpcomingBreak = false
         hasWarned = false
+        lastObservedTime = now
     }
 }

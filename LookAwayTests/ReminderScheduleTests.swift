@@ -35,10 +35,8 @@ final class ReminderScheduleTests: XCTestCase {
     func testReorderingRemindersDoesNotResetWorkOrReminderDeadlines() {
         var schedule = BreakSchedule(configuration: configuration(reminders: [(a, 300), (b, 600)]), now: 0)
         _ = schedule.advance(at: 100)
-        schedule.skipUpcomingBreak()
         schedule.updateConfiguration(configuration(reminders: [(b, 600), (a, 300)]), at: 100)
         XCTAssertEqual(schedule.remainingSeconds(at: 100), 1700)
-        XCTAssertTrue(schedule.skipsUpcomingBreak)
         XCTAssertEqual(schedule.advance(at: 299), [])
         XCTAssertEqual(schedule.advance(at: 300), [.reminder(a)])
         XCTAssertEqual(schedule.advance(at: 600), [.reminder(b), .reminder(a)])

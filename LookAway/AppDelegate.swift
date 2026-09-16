@@ -203,7 +203,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             presentBreak()
             return
         }
-        if events.contains(.skippedBreak) { popupBanner.hide() }
         if events.contains(.warning) { showWarningPopup() }
         let settings = settingsStore.value
         if let message = ReminderPresentationResolver.message(for: events, settings: settings) {
@@ -225,7 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onKnow: {},
             onSkipBreak: { [weak self] in
                 guard let self = self, self.settingsStore.value.allowSkip else { return }
-                self.schedule.skipUpcomingBreak()
+                self.schedule.skipUpcomingBreak(at: self.now)
                 self.tick()
             },
             onAddFiveMinutes: { [weak self] in
@@ -286,7 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch schedule.phase {
         case .working:
             text = time
-            icon = schedule.skipsUpcomingBreak ? "forward.end" : "timer"
+            icon = "timer"
         case .paused:
             text = activeHours.ownsPause ? "Outside hours" : "Paused " + time
             icon = activeHours.ownsPause ? "calendar" : "pause.circle.fill"
@@ -301,9 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let image = NSImage(systemSymbolName: icon, accessibilityDescription: text)
             image?.isTemplate = true
             button.image = image
-            button.toolTip = schedule.skipsUpcomingBreak
-                ? "LookAway: " + text + ". The next scheduled break will be skipped."
-                : "LookAway: " + text
+            button.toolTip = "LookAway: " + text
         }
         pauseItem?.title = activeHours.ownsPause ? "Keep Paused" : (schedule.phase == .paused ? "Resume Timer" : "Pause Timer")
         pauseItem?.isEnabled = schedule.phase != .onBreak && !schedule.isSleeping

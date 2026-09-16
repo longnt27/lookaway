@@ -31,7 +31,6 @@ struct BreakContent: View {
     let readyDelay: Int
     let canFinish: Bool
     let onDone: () -> Void
-    let onSkip: () -> Void
     var preview = false
 
     private var scale: CGFloat { CGFloat(settings.textSizePercent) / 100 }
@@ -56,23 +55,13 @@ struct BreakContent: View {
                     .accessibilityLabel("Break time remaining")
                     .accessibilityValue("\(remaining) seconds")
             }
-            if settings.allowSkip || settings.allowEarlyFinish {
-                HStack(spacing: 12) {
-                    if settings.allowSkip {
-                        Button("Skip Break", action: onSkip)
-                            .buttonStyle(ReadyButtonStyle(disabled: preview, compact: preview, secondary: true))
-                            .disabled(preview)
-                            .accessibilityIdentifier("skipBreak")
-                    }
-                    if settings.allowEarlyFinish {
-                        Button(action: onDone) {
-                            Text(readyDelay > 0 ? "I'm ready (\(readyDelay))" : "I'm ready")
-                        }
-                        .buttonStyle(ReadyButtonStyle(disabled: !canFinish || preview, compact: preview))
-                        .disabled(!canFinish || preview)
-                        .accessibilityIdentifier("finishBreak")
-                    }
+            if settings.allowEarlyFinish {
+                Button(action: onDone) {
+                    Text(readyDelay > 0 ? "I'm ready (\(readyDelay))" : "I'm ready")
                 }
+                .buttonStyle(ReadyButtonStyle(disabled: !canFinish || preview, compact: preview))
+                .disabled(!canFinish || preview)
+                .accessibilityIdentifier("finishBreak")
             }
         }
         .padding(preview ? 16 : 32)
@@ -85,7 +74,6 @@ struct OverlayView: View {
     @ObservedObject var viewModel: OverlayViewModel
     let mode: OverlayMode
     let onDone: () -> Void
-    let onSkip: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPresented = false
 
@@ -105,8 +93,7 @@ struct OverlayView: View {
                     remaining: viewModel.remaining,
                     readyDelay: viewModel.readyDelayRemaining,
                     canFinish: viewModel.canFinishEarly,
-                    onDone: onDone,
-                    onSkip: onSkip
+                    onDone: onDone
                 )
             } else {
                 Text(viewModel.message)

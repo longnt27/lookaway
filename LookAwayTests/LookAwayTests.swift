@@ -28,20 +28,21 @@ final class LookAwayTests: XCTestCase {
         XCTAssertEqual(schedule.advance(at: 2500), [])
     }
 
-    func testSkipStartsAFullWorkIntervalAndIsConsumedExactlyOnce() {
+    func testSkipStartsAFreshWorkIntervalImmediately() {
         var schedule = BreakSchedule(now: 0)
-        schedule.skipUpcomingBreak()
-        XCTAssertEqual(schedule.advance(at: 1800), [.skippedBreak])
-        XCTAssertEqual(schedule.remainingSeconds(at: 1800), 1800)
-        XCTAssertFalse(schedule.skipsUpcomingBreak)
-        XCTAssertEqual(schedule.advance(at: 1801), [])
-        XCTAssertEqual(schedule.advance(at: 3600), [.startBreak])
+        XCTAssertTrue(schedule.advance(at: 1740).contains(.warning))
+        XCTAssertTrue(schedule.skipUpcomingBreak(at: 1740))
+        XCTAssertEqual(schedule.remainingSeconds(at: 1740), 1800)
+        XCTAssertEqual(schedule.advance(at: 1800), [])
+        XCTAssertEqual(schedule.advance(at: 3540), [.startBreak])
     }
 
-    func testSkippedBreakDoesNotEmitAnotherWarning() {
+    func testSkippingRearmsWarningForTheFreshWorkInterval() {
         var schedule = BreakSchedule(now: 0)
-        schedule.skipUpcomingBreak()
-        XCTAssertFalse(schedule.advance(at: 1750).contains(.warning))
+        XCTAssertTrue(schedule.advance(at: 1740).contains(.warning))
+        XCTAssertTrue(schedule.skipUpcomingBreak(at: 1740))
+        XCTAssertFalse(schedule.advance(at: 3479).contains(.warning))
+        XCTAssertTrue(schedule.advance(at: 3480).contains(.warning))
     }
 
     func testManualBreakOverridesPendingSkip() {

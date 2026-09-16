@@ -4,16 +4,22 @@ import XCTest
 
 @MainActor
 final class BreakAndSettingsPolishTests: XCTestCase {
-    func testBreakOverlayExposesSkipBreakActionWhenSkippingIsAllowed() throws {
-        let source = try repositorySource("LookAway/OverlayView.swift")
+    func testWarningPopupExposesSkipBreakActionWhenSkippingIsAllowed() throws {
+        let source = try repositorySource("LookAway/PopupBannerView.swift")
         XCTAssertTrue(source.contains("if settings.allowSkip"))
         XCTAssertTrue(source.contains("Button(\"Skip Break\""))
+        XCTAssertTrue(source.contains("accessibilityIdentifier(\"skipUpcomingBreak\")"))
     }
 
-    func testOverlayControllerWiresSkipBreakToDismissTheActiveBreak() throws {
+    func testActiveBreakOverlayDoesNotExposeSkipBreakAction() throws {
+        let source = try repositorySource("LookAway/OverlayView.swift")
+        XCTAssertFalse(source.contains("Button(\"Skip Break\""))
+        XCTAssertFalse(source.contains("accessibilityIdentifier(\"skipBreak\")"))
+    }
+
+    func testOverlayControllerDoesNotWireAnActiveBreakSkipAction() throws {
         let source = try repositorySource("LookAway/OverlayController.swift")
-        XCTAssertTrue(source.contains("onSkip:"))
-        XCTAssertTrue(source.contains("dismiss(presentationID: id)"))
+        XCTAssertFalse(source.contains("onSkip:"))
     }
 
     func testSettingsWindowStaysCompactAfterContentIsMounted() throws {
