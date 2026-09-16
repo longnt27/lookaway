@@ -85,12 +85,11 @@ Schedule recurring work sessions and breaks with:
 - configurable work duration
 - configurable break duration
 - advance warnings
-- skip controls
+- a warning-time **Skip Break** action that immediately starts a fresh work interval
 - postpone controls
-- optional early finish
-- an actual **Skip Break** action during the active break when skipping is enabled
+- optional early finish once a break has actually begun
 
-A break should be a break, not a hostage situation conducted by your own menu bar.
+A break should be a break, not a hostage situation conducted by your own menu bar. The warning is where you negotiate with fate. Once the break starts, we stop putting an eject button next to the thing you just agreed to do.
 
 ### 🔔 Arbitrary recurring reminders
 
@@ -198,13 +197,12 @@ Click the icon to:
 
 Before a scheduled break, the warning can allow you to:
 
-- **Skip** the upcoming break
+- **Skip** the upcoming break, immediately starting a fresh work interval from that moment
 - **Postpone** it
 
-During an active break, if those options are enabled, you can:
+During an active break, if early finishing is enabled, you can finish early with **I'm ready** after the configured delay.
 
-- **Skip Break**
-- finish early with **I'm ready** after the configured delay
+There is deliberately no **Skip Break** button once the break has started. At that point the negotiation window has closed. Thirty seconds of peace has been declared by treaty.
 
 LookAway is meant to support your attention, not seize administrative control over your body.
 
@@ -263,7 +261,7 @@ LookAway has **five** settings tabs.
 - work duration
 - break duration
 - warning timing
-- skip behavior
+- warning-time skip behavior
 - postpone behavior
 - early finish behavior
 
@@ -322,19 +320,19 @@ You can choose whether it shows:
 
 If early finishing is enabled, **I'm ready** becomes available after the configured delay.
 
-If skipping is enabled, **Skip Break** is available directly on the active break screen.
+That is the only early exit on the active break screen. **Skip Break** belongs to the warning before the break, where using it immediately begins a fresh full work interval.
 
-This distinction matters.
+This distinction matters because buttons should mean what their labels claim instead of participating in temporal bureaucracy.
 
-Finishing early means:
+Before the break:
 
-> "I took enough of the break."
+> "Not this one. Start my next work interval now."
 
-Skipping means:
+After the break begins:
 
-> "Not now. I accept the consequences and will answer to my vertebrae later."
+> "I have actually taken enough of the break."
 
-Software should be capable of understanding the difference.
+Software has now, after some negotiations, learned the difference.
 
 ---
 
