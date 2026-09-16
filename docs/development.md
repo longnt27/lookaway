@@ -95,7 +95,7 @@ When multiple reminder IDs are due on the same tick, `ReminderPresentationResolv
 
 ## Break and presentation behavior
 
-Skip suppresses exactly one scheduled break. Postpone adds the configured duration to the existing deadline and rearms the warning. Manual breaks override pending skips. Active breaks keep their existing countdown and settings snapshot when saved preferences change.
+`Skip Break` is a pre-break warning action. When selected, the warning closes and the scheduler immediately starts a fresh full work interval from that moment; the old break deadline is not allowed to fire later. Postpone adds the configured duration to the existing deadline and rearms the warning. Paused and sleeping schedules reject warning actions. Once a break is active there is no skip action; optional early finish remains available through **I'm ready** after its configured delay. Active breaks keep their existing countdown and settings snapshot when saved preferences change.
 
 Break/warning and reminder display selections are independent. Primary display means the first `NSScreen.screens` entry. Pointer selection is captured when a presentation starts, with primary fallback. Compact and full-screen reminders share countdown/completion logic and pass mouse input through.
 
