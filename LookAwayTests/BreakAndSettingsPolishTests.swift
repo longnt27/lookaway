@@ -4,16 +4,28 @@ import XCTest
 
 @MainActor
 final class BreakAndSettingsPolishTests: XCTestCase {
-    func testBreakOverlayExposesSkipBreakActionWhenSkippingIsAllowed() throws {
-        let source = try repositorySource("LookAway/OverlayView.swift")
-        XCTAssertTrue(source.contains("if settings.allowSkip"))
-        XCTAssertTrue(source.contains("Button(\"Skip Break\""))
+    func testWarningSkipConsumesImmediatelyAndStartsFreshWorkInterval() {
+        var schedule = BreakSchedule(now: 0)
+        XCTAssertTrue(schedule.advance(at: 1740).contains(.warning))
+
+        schedule.skipUpcomingBreak()
+        XCTAssertEqual(schedule.advance(at: 1740), [.skippedBreak])
+        XCTAssertEqual(schedule.remainingSeconds(at: 1740), 1800)
+
+        XCTAssertEqual(schedule.advance(at: 1800), [])
+        XCTAssertEqual(schedule.remainingSeconds(at: 1800), 1740)
+        XCTAssertEqual(schedule.advance(at: 3540), [.startBreak])
     }
 
-    func testOverlayControllerWiresSkipBreakToDismissTheActiveBreak() throws {
+    func testBreakOverlayDoesNotExposeSkipBreakActionDuringActiveBreak() throws {
+        let source = try repositorySource("LookAway/OverlayView.swift")
+        XCTAssertFalse(source.contains("Button(\"Skip Break\""))
+        XCTAssertFalse(source.contains("accessibilityIdentifier(\"skipBreak\")"))
+    }
+
+    func testOverlayControllerDoesNotWireAnActiveBreakSkipAction() throws {
         let source = try repositorySource("LookAway/OverlayController.swift")
-        XCTAssertTrue(source.contains("onSkip:"))
-        XCTAssertTrue(source.contains("dismiss(presentationID: id)"))
+        XCTAssertFalse(source.contains("onSkip:"))
     }
 
     func testSettingsWindowStaysCompactAfterContentIsMounted() throws {
