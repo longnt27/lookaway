@@ -183,7 +183,6 @@ final class OverlayController {
                                        styleMask: [.borderless, .nonactivatingPanel],
                                        backing: .buffered, defer: false)
             window.configureForOverlay()
-            window.level = compact ? .floating : .screenSaver
             window.hasShadow = compact
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             if case .reminder = mode { window.ignoresMouseEvents = true }

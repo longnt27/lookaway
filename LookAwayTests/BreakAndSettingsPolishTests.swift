@@ -28,6 +28,11 @@ final class BreakAndSettingsPolishTests: XCTestCase {
         XCTAssertFalse(source.contains("onSkip:"))
     }
 
+    func testBreakOverlayDoesNotUseScreenSaverWindowLevel() throws {
+        let source = try repositorySource("LookAway/OverlayController.swift")
+        XCTAssertFalse(source.contains(".screenSaver"))
+    }
+
     func testSettingsWindowStaysCompactAfterContentIsMounted() throws {
         let login = LoginItemController(
             readStatus: { .enabled },

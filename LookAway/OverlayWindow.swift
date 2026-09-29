@@ -13,5 +13,6 @@ final class OverlayWindow: NSPanel {
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = true
         isFloatingPanel = true
+        level = .floating
     }
 }
