@@ -215,6 +215,7 @@ final class PresentationTests: XCTestCase {
         XCTAssertTrue(panel.becomesKeyOnlyIfNeeded)
         XCTAssertFalse(panel.canBecomeMain)
         XCTAssertFalse(panel.hidesOnDeactivate)
+        XCTAssertEqual(panel.level, .floating)
         panel.close()
     }
 }
